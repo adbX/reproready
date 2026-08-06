@@ -10,11 +10,9 @@ the manual effort a reproduction would otherwise cost. Point it at a directory,
 a `.zip`, or a `.tar.gz` and it returns a score `R ∈ [0, 1]`, a tier, and a
 graded grid you can inspect cell by cell.
 
-## The model in one screen
-
 Reproduction is modelled as four stages, each judged on two independent
 channels — the **implementation** (machine-actionable files) and the
-**documentation** (prose that names and explains them):
+**documentation** (prose):
 
 | Stage | What the artifact must answer |
 |---|---|
@@ -23,14 +21,14 @@ channels — the **implementation** (machine-actionable files) and the
 | **X** — Execution | How is the reported result actually produced? |
 | **V** — Validation | How do the outputs map back to the paper's claims? |
 
-The score is **non-compensatory**: a stage the artifact leaves unanswered
+The scoring method ensures that a stage the artifact leaves unanswered
 cannot be bought back by another. See the [specification](spec.md) for the full
 model, grading, tiers, and worked examples.
 
 ## Get started
 
 ```sh
-uv add reproready            # or: pip install reproready
+uv tool install reproready            # or: pip install reproready
 reproready score path/to/artifact.zip
 ```
 
