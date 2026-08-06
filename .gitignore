@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Environments / build
+.venv/
+build/
+dist/
+site/
+.cache/
+
+# Private, machine-local guardrails and notes (never committed)
+CLAUDE.local.md
+
+# OS / editor
+.DS_Store
