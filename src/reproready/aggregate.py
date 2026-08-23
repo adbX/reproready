@@ -1,4 +1,4 @@
-"""Aggregation — cell grid → stage vector → ReproReady score, tier, coverage (spec §4–7).
+"""Aggregation: cell grid to stage vector, ReproReady score, tier, and coverage.
 
 A **pure** function over the graded cells, parameterised by an
 :class:`AggregationConfig`. This is the core modularity: every scoring variant —
@@ -6,14 +6,17 @@ geometric mean vs. min, equal vs. tilted weights, leave-one-stage-out, a
 documentation-cap sweep — is just a different config over the *same* graded
 cells, so a sweep never re-reads archives or re-calls the model.
 
-The defaults reproduce the spec exactly:
+The class defaults reproduce the baseline calculation:
 
 - **within a stage** — noisy-OR ``R_s = 1 − (1−Implementation)(1−Documentation)``,
-  Documentation capped at ``0.5`` (spec §4).
+  Documentation capped at ``0.5``.
 - **across stages** — equal-weight geometric mean ``(∏ R_s)^{1/n}`` over the
-  in-scope, observable stages, with a hard ``R_s = 0 ⇒ R = 0`` floor (spec §4).
-- **tier** — read off ``R`` with a redundancy gate (spec §6).
-- **coverage** — count of in-scope stages visible to a static read (spec §7).
+  in-scope, observable stages, with a hard ``R_s = 0 ⇒ R = 0`` floor.
+- **tier** — baseline score bands with a redundancy gate.
+- **coverage** — count of in-scope stages visible to a static read.
+
+Public ``score_path`` uses :data:`PROMOTED_CONFIG`, which replaces the baseline
+tier bands and enables false-zero scope handling.
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ from .routing import DOCUMENTATION, IMPLEMENTATION, STAGES
 
 DOCUMENTATION_CAP = 0.5
 
-# Equal weights (primary spec §4); the 1/n exponent renormalises over scope.
+# Equal weights; the 1/n exponent renormalises over scope.
 EQUAL_WEIGHTS: dict[str, float] = {s: 0.25 for s in STAGES}
 # An illustrative tilt that emphasises the harder Execution/Validation end. Not
 # the primary score; reported alongside it.
@@ -39,7 +42,7 @@ def noisy_or(
     documentation: float,
     documentation_cap: float = DOCUMENTATION_CAP,
 ) -> float:
-    """RBD parallel-block / noisy-OR within one stage (spec §4)."""
+    """RBD parallel-block / noisy-OR within one stage."""
     d = min(documentation, documentation_cap)
     return 1.0 - (1.0 - implementation) * (1.0 - d)
 
@@ -51,12 +54,12 @@ TIER_RECUT_CUTS: tuple[float, float] = (0.66, 0.80)
 
 @dataclass(frozen=True)
 class AggregationConfig:
-    """Every aggregation choice, defaulting to the spec.
+    """Every aggregation choice, defaulting to the baseline mapping.
 
     The defaults reproduce the version-stamped baseline exactly. The extra
     fields are the tiers-&-scope knobs plus the *non-promotable*
     floor-softening diagnostics — all inert at their defaults, so a default
-    config is byte-identical to the spec scorer.
+    config reproduces the original baseline scorer.
     """
 
     within_stage: Callable[[float, float, float], float] = noisy_or
@@ -74,7 +77,7 @@ class AggregationConfig:
     # in-scope-and-scored-0.
     false_zero_scope: bool = False
     false_zero_stages: frozenset[str] = frozenset({"I", "V"})
-    # Non-promotable floor-softening diagnostics (spec §6; never shipped).
+    # Non-promotable floor-softening diagnostics; never shipped.
     # zero_floor: replace the hard geomean R=0 with a small ε. missing_stage_value:
     # an in-scope stage scoring 0 contributes this instead of 0. Both 0 = baseline.
     zero_floor: float = 0.0
@@ -86,7 +89,7 @@ class AggregationConfig:
 # ---------------------------------------------------------------------------
 # The promoted tiers-&-scope config: the tier re-cut plus false-zero scope. It
 # freezes only the **tier-cut + scope labelling** — the ``R`` *formula* is the
-# spec default above and is **unchanged** (so this is not a freeze of the
+# base formula above and is **unchanged** (so this is not a freeze of the
 # metric, only of how the score is banded and scoped). Bump
 # ``TIER_SCOPE_VERSION`` if the cut-points or false-zero set ever change.
 TIER_SCOPE_VERSION = "tier-scope-v1"
@@ -137,10 +140,10 @@ def aggregate(
     """Aggregate one artifact from its ``{(stage, channel): grade}`` grid.
 
     ``cells`` maps every present cell to its grade (absent → 0). A stage that is
-    in scope but **unobservable** (README dark and no Implementation signal, spec
-    §5 case 3) is dropped from the scored set and only docks coverage; an
+    in scope but **unobservable** (README dark and no Implementation signal) is
+    dropped from the scored set and only docks coverage; an
     in-scope, observable stage with both channels 0 scores ``R_s = 0`` and
-    floors ``R`` (spec §4, the construct boundary).
+    floors ``R``.
 
     With ``config.false_zero_scope``, the unobservable rule is widened from
     *README-dark* to *no readable documentation channel* (dark **or** absent) for
@@ -160,7 +163,7 @@ def aggregate(
             continue
         implementation = cells.get((s, IMPLEMENTATION), 0.0)
         documentation = min(cells.get((s, DOCUMENTATION), 0.0), cfg.documentation_cap)
-        # Unobservable (spec §5 case 3): README dark and no Implementation signal
+        # Unobservable: README dark and no Implementation signal
         # → drop, dock coverage. false_zero_scope widens this to "no readable
         # documentation channel" for the configured false-zero stages.
         unobservable = readme_dark and implementation <= 0.0
@@ -199,7 +202,7 @@ def tier(
     has_code: bool,
     config: AggregationConfig | None = None,
 ) -> str:
-    """Ordinal ACM-badge-style label from ``R`` (spec §6).
+    """Return the configured ordinal label from ``R``.
 
     The ``baseline`` scheme is the version-stamped cut (redundancy-gated Tier 3,
     a ``≥0.5`` Tier 2, and a Tier 1 that lands in the structurally-empty

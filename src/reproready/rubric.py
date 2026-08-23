@@ -1,17 +1,17 @@
-"""The grading rubric — a registry of deterministic cell detectors (spec §3).
+"""The grading rubric: a registry of deterministic cell detectors.
 
 Every ``(stage, channel)`` cell is graded ``0 / 0.5 / 1`` by a pure detector
 over the inventory + the extracted evidence for that cell's files:
 
 - **Presence (``0.5``)** = the routing match (a candidate file, or a README that
   documents the stage).
-- **Implementation ``0.5 → 1``** = a deterministic strong check (spec §3.1) —
+- **Implementation ``0.5 → 1``** = a deterministic strong check:
   pinning (E), obtainable-data + real-config (I), a real orchestrator (X). Each
   lives in :data:`STRONG_CHECKS` as a **named, individually swappable** function,
   and bumps :data:`RUBRIC_VERSION` when changed.
-- **Documentation** detectors structurally cap at ``0.5`` (spec §2.2): a README
+- **Documentation** detectors structurally cap at ``0.5``: a README
   that documents the stage scores ``0.5``, never ``1``.
-- **Validation ``0.5 → 1``** is the one semantic judgment (spec §3.2). Here it is
+- **Validation ``0.5 → 1``** is the one semantic judgment. Here it is
   held at the deterministic floor (``0.5`` when a producer is present); the
   promote-only model call is the pluggable phase-2 detector.
 
@@ -29,9 +29,9 @@ from . import routing
 
 RUBRIC_VERSION = "rubric-v1"
 
-# Canonical human-readable stage names, keyed by stage letter (spec §2.1). The
+# Canonical human-readable stage names, keyed by stage letter. The
 # single source of truth for display labels — import this, never hand-type a
-# legend/axis label, so callers can't drift from the spec. Note: I = **Inputs**
+# legend/axis label, so callers cannot drift from the engine. Note: I = **Inputs**
 # (data acquisition / preprocessing / configs), NOT "Instructions": the
 # Documentation channel of *every* stage carries instructions, so the letter is
 # easy to mis-expand. Ordered E / I / X / V (the in-series stage order).
@@ -148,7 +148,7 @@ def strip_line_numbers(numbered: str) -> str:
     return "\n".join(out)
 
 
-# --- deterministic strong checks (spec §3.1) ---------------------------------
+# --- deterministic strong checks ---------------------------------------------
 
 
 def _env_strong(
@@ -262,7 +262,7 @@ STRONG_CHECKS = {
 
 
 def _readme_documents_stage(text: str, stage: str) -> bool:
-    """True iff the README has a section / prose documenting ``stage`` (§3.1).
+    """True iff the README has a section or prose documenting ``stage``.
 
     Markdown headers (``#``) bound sections — a stage is documented iff a
     matching header has non-empty body. README forms without headers

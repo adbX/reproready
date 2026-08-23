@@ -16,8 +16,9 @@ Quickstart::
     report = score_path("path/to/artifact.zip")
     print(report.r, report.tier)
 
-The five version stamps below identify the deterministic logic that produced a
-report; bumping any of them changes scores and invalidates cached grades.
+The five version stamps below identify routing, rubric, extraction, Validation
+prompt, and promoted tier/scope behavior. Callers decide how those identifiers
+affect persisted reports and cache invalidation.
 """
 
 from __future__ import annotations

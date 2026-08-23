@@ -7,7 +7,7 @@ well as the in-memory :class:`~reproready.score.ArtifactReport` flow.
 
 A verdict is applied **promote-only**: a ``promote=True`` lifts
 ``V/implementation`` ``0.5 → 1``; a ``promote=False`` / malformed / ``None``
-holds the deterministic floor and never lowers it. See spec §3.2.
+holds the deterministic floor and never lowers it on the intended first pass.
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ def readme_results_slice(text: str, max_chars: int = README_SLICE_MAX_CHARS) -> 
 
 
 def producer_snippet(content: str | None) -> str:
-    """The output-writing call-sites for one producer, de-numbered + capped."""
+    """The extracted evidence for one producer, de-numbered and capped."""
     if not content:
         return ""
     return rubric.strip_line_numbers(content)[:SNIPPET_MAX_CHARS]

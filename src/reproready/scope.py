@@ -1,10 +1,10 @@
-"""Scope — pure over the file inventory (spec §5).
+"""Scope decisions made from the file inventory.
 
 Decides, from the file inventory alone (no archive bytes), which of the four
 stages an artifact actually exercises, and finds the README that carries the
 Documentation channel. Offline and deterministic.
 
-Scope rules (spec §5):
+Scope rules:
 
 - **Environment** — always in scope (code always needs an environment).
 - **Inputs** — in scope by default; the *confirmed self-contained* exception
@@ -17,7 +17,7 @@ Scope rules (spec §5):
 
 A README that is *present but unparseable* (e.g. only ``README.pdf``) is flagged
 ``readme_dark``: the Documentation channel cannot be read, which downstream drops
-the unobservable stages from coverage (spec §7) rather than scoring them as
+unobservable stages from coverage rather than scoring them as
 failures.
 """
 
@@ -111,7 +111,7 @@ def count_runnable(entries: list[RawEntry]) -> int:
 
 
 def compute_scope(entries: list[RawEntry]) -> Scope:
-    """Scope an artifact from its inventory alone (spec §5)."""
+    """Scope an artifact from its inventory alone."""
     n_runnable = count_runnable(entries)
     readme_path, has_readme, readme_dark = pick_readme(entries)
     in_scope = {"E": True, "I": True, "X": n_runnable >= 2, "V": True}

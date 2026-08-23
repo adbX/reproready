@@ -22,7 +22,6 @@ src/reproready/        # the package
   cli.py               # `reproready score`
 tests/                 # pytest suite (mirrors each module) + test_e2e.py
 examples/demo-artifact # a synthetic, well-formed artifact used by the e2e test
-docs/                  # zensical site: spec, implementation, CLI
 ```
 
 ## Commands
@@ -30,15 +29,14 @@ docs/                  # zensical site: spec, implementation, CLI
 The project uses `uv`. Run everything through it:
 
 ```sh
-uv sync                     # env + editable install (dev group: pytest, ruff, zensical)
+uv sync                     # env + editable install (dev group: pytest, ruff)
 uv run pytest               # tests
 uv run ruff check           # lint (E4/E7/E9/F + isort)
 uv run ruff format --check  # format gate
-uv run zensical build       # docs must build clean
 uv run reproready score examples/demo-artifact   # smoke the CLI
 ```
 
-CI runs all of these (lint, a 3.10/3.12/3.13 pytest matrix, and the docs build).
+CI runs lint and a Python 3.10/3.12/3.13 pytest matrix.
 
 ## Architecture notes
 
@@ -50,10 +48,11 @@ CI runs all of these (lint, a 3.10/3.12/3.13 pytest matrix, and the docs build).
 - **`score_path` is the whole pipeline in memory**: inventory → junk filter →
   route → scope → targeted byte reads → evidence → rubric → aggregate, returning
   an `ArtifactReport`. No database, no persistence.
-- **Scoring is deterministic and versioned.** Five stamps identify the logic:
+- **Scoring behavior is versioned.** Five stamps identify routing, rubric,
+  extraction, the Validation prompt, and promoted tier/scope behavior:
   `ROUTING_VERSION`, `RUBRIC_VERSION`, `EXTRACT_VERSION`, `PROMPT_VERSION`,
-  `TIER_SCOPE_VERSION`. Any change to the deterministic behaviour of a module
-  must bump its stamp — scores from different logic must never be conflated.
+  `TIER_SCOPE_VERSION`. Callers decide how those identifiers affect persisted
+  reports and cache invalidation.
 - **`score_path` defaults to `aggregate.PROMOTED_CONFIG`** (recut tiers so
   tiers 1–3 populate; false-zero scope). Pass an explicit `AggregationConfig`
   to override.

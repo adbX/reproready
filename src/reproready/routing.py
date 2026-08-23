@@ -1,20 +1,20 @@
 """Versioned basename → (stage, channel) routing table — the deterministic screen.
 
 A path is classified into at most **one** ``(stage, channel)`` cell by the
-first matching rule in :data:`RULES` (one-file-one-channel; spec §2.2). Every
+first matching rule in :data:`RULES`. Every
 non-README file routes to the **Implementation** channel of its presence stage;
 the README / prose carries the **Documentation** channel and is detected
 separately by :func:`is_renderable_readme` (one README lights up the
-Documentation cell of every stage, spec §2.2 / §3.1). The table is versioned:
+Documentation cell of every stage). The table is versioned:
 change it only by bumping :data:`ROUTING_VERSION`.
 
 This is the **2-channel** routing. An earlier design split machine-actionable
-files into Automation vs. Files; the spec collapses both into a single
+files into Automation vs. Files; the current model collapses both into a single
 Implementation channel ("a pinned ``Dockerfile`` and an ``install.sh`` are
 equally machine-actionable"). The stage assignments are unchanged; only the
 channel label is unified.
 
-Weak execution credit (spec §3.1): a computational source module (``model.py``,
+Weak execution credit: a computational source module (``model.py``,
 ``losses.py``, …) is the *substance being reproduced*, not a driver. It falls
 through to the ``X/implementation`` catch-all as a *runnable unit* and counts
 toward Execution scope, but ``1`` still requires a real orchestrator (a rubric
@@ -49,7 +49,7 @@ class Cell:
 
 # --- extension / junk vocabularies ------------------------------------------
 
-# Source files that count as **runnable units** (Execution scope, spec §5) and
+# Source files that count as **runnable units** for Execution scope and
 # feed the ``X/implementation`` computational catch-all. Covers Python and the
 # other languages that commonly appear in research code.
 CODE_EXTS: frozenset[str] = frozenset(
@@ -179,7 +179,7 @@ def is_junk(path: str) -> bool:
 
 
 def is_renderable_readme(path: str) -> bool:
-    """True for a README whose extension we can parse as prose (spec §3.1)."""
+    """True for a README whose extension we can parse as prose."""
     base = basename(path).lower()
     if not base.startswith("readme"):
         return False
@@ -187,7 +187,7 @@ def is_renderable_readme(path: str) -> bool:
 
 
 def is_runnable_unit(path: str, is_dir: bool) -> bool:
-    """A script / notebook / source module (Execution scope, spec §5)."""
+    """A script, notebook, or source module counted for Execution scope."""
     if is_dir or is_junk(path):
         return False
     return extension(path) in CODE_EXTS

@@ -5,10 +5,10 @@ A fixed system prompt + few-shots → a structured JSON verdict, with pure helpe
 loop (Messages API) or the Batches API.
 
 The judgment is **manuscript-free** (no paper text — only the producer files'
-basenames + the output-writing call-sites extracted from them, and the README
-results section) and **promote-only** (a ``true`` verdict lifts
+basenames + bounded extracted evidence, and the README results section) and
+**promote-only** (a ``true`` verdict lifts
 Validation/Implementation ``0.5 → 1``; a ``false`` verdict never lowers the
-deterministic floor). See spec §3.2.
+deterministic floor).
 
 ``PROMPT_VERSION`` is a cache-invalidation key (like ``routing-v2`` /
 ``rubric-v1``): bump it when the prompt changes and re-validation re-runs.

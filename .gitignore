@@ -9,7 +9,6 @@ __pycache__/
 .venv/
 build/
 dist/
-site/
 .cache/
 
 # Private, machine-local guardrails and notes (never committed)

@@ -30,12 +30,3 @@ jobs:
         uses: astral-sh/setup-uv@v5
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} pytest
-
-  docs:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-      - name: Build docs
-        run: uv run zensical build

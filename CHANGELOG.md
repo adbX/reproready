@@ -6,6 +6,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Moved the score specification and implementation reference to the research repository.
+- Reduced this repository's documentation to source installation and development setup in the README.
+- Removed the documentation site, Zensical dependency, and documentation CI job.
+
 ## [0.1.0]
 
 Initial release.
