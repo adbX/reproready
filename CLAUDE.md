@@ -40,11 +40,15 @@ CI runs lint and a Python 3.10/3.12/3.13 pytest matrix.
 
 ## Architecture notes
 
-- **The scoring core is standard-library only.** `inventory`, `routing`,
+- **The score modules are standard-library only.** `inventory`, `routing`,
   `scope`, `content`, `extract`, `rubric`, `aggregate`, `score` import nothing
-  outside the stdlib. `rich` is used only by `cli.py`; `anthropic` only by the
+  outside the stdlib, and that stays true so the released score remains
+  reproducible. `rich` is used only by `cli.py`; `anthropic` only by the
   optional Validation call (`validation.py`, lazily imported behind the `llm`
-  extra). Keep it that way.
+  extra). The rule covers the score modules, not the package: the checker
+  modules planned beside them may carry pinned runtime dependencies, such as a
+  grammar-pinned Python parser in the core and a strict YAML parser plus schema
+  validator behind a `review` extra.
 - **`score_path` is the whole pipeline in memory**: inventory → junk filter →
   route → scope → targeted byte reads → evidence → rubric → aggregate, returning
   an `ArtifactReport`. No database, no persistence.

@@ -17,8 +17,10 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 
-# The scoring core is standard-library only. `rich` is used solely by the CLI
+# The score modules are standard-library only. `rich` is used solely by the CLI
 # renderer; `anthropic` (the `llm` extra) solely by the optional Validation call.
+# The checker modules planned beside the score may add pinned runtime
+# dependencies and an optional `review` extra.
 dependencies = [
     "rich>=13.0",
 ]
