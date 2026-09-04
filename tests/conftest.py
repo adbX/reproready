@@ -14,6 +14,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from checker_input_fixtures import CheckerInputSet, build_checker_inputs
 
 DEEP_SPEC: dict[str, str | None] = {
     # Depth 1
@@ -137,3 +138,10 @@ def fixtures_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
         outer.writestr("ok.txt", b"still here")
 
     return root
+
+
+@pytest.fixture(scope="session")
+def checker_inputs(tmp_path_factory: pytest.TempPathFactory) -> CheckerInputSet:
+    """Build the frozen checker input matrix once for the test session."""
+
+    return build_checker_inputs(tmp_path_factory.mktemp("checker-inputs"))

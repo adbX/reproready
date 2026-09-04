@@ -9,6 +9,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Added the initial checker report schema, `python-v1` ruleset, public guide,
   and synthetic contract reports. The checker command remains under
   development.
+- Added the versioned bounded-browser pilot contract and a deterministic synthetic
+  input matrix for ZIP, Python, notebook, path, dependency, mutation, and
+  terminal-safety behavior, plus the timeout-test checkpoint contract.
 - Moved the score specification and implementation reference to the research repository.
 - Reduced this repository's documentation to source installation and development setup in the README.
 - Removed the documentation site, Zensical dependency, and documentation CI job.

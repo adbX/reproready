@@ -6,9 +6,12 @@ The report contract and initial rule semantics are frozen before implementation:
 
 - [JSON report schema v1](../src/reproready/schemas/check-report-v1.schema.json)
 - [Python ruleset v1](checker-ruleset-v1.md)
+- [Bounded browser pilot contract](checker-browser-v1.md)
 - [Synthetic report examples](../tests/fixtures/checker-report-v1/)
 
 `reproready check` and `check_path()` are not available yet. The current package continues to provide `reproready score` and `score_path()` unchanged.
+
+The bounded browser is an implementation contract for development rule-discovery work, not a public command or model-assisted checker mode. It can expose only escaped, bounded data from the completed checker snapshot through stable member identities.
 
 ## Intended interface
 
