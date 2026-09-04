@@ -6,6 +6,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Added the initial checker report schema, `python-v1` ruleset, public guide,
+  and synthetic contract reports. The checker command remains under
+  development.
 - Moved the score specification and implementation reference to the research repository.
 - Reduced this repository's documentation to source installation and development setup in the README.
 - Removed the documentation site, Zensical dependency, and documentation CI job.

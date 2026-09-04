@@ -1,0 +1,363 @@
+{
+  "schema_version": "1",
+  "tool_version": "0.2.0.dev0",
+  "ruleset_version": "python-v1",
+  "artifact": {
+    "display_name": "report\u001b[31m.zip",
+    "detected_kind": "zip",
+    "size_bytes": 4096,
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "snapshot_complete": true
+  },
+  "runtime": {
+    "system": "macos",
+    "python": {
+      "implementation": "CPython",
+      "version": "3.13.7"
+    },
+    "parsers": [
+      {
+        "name": "ast",
+        "version": "3.13.7"
+      },
+      {
+        "name": "zipfile",
+        "version": "3.13.7"
+      }
+    ]
+  },
+  "limits": {
+    "effective": {
+      "max_input_bytes": 2147483648,
+      "max_member_count": 100000,
+      "max_nested_zip_depth": 3,
+      "max_expanded_bytes_per_member": 536870912,
+      "max_expanded_bytes_total": 4294967296,
+      "max_python_source_bytes": 8388608,
+      "max_notebook_bytes": 33554432,
+      "max_dependency_file_bytes": 8388608,
+      "max_worker_rss_bytes": 1073741824,
+      "max_temporary_bytes": 4294967296,
+      "max_elapsed_seconds": 120,
+      "max_observations": 10000,
+      "max_report_bytes": 67108864,
+      "max_snippet_codepoints": 240
+    },
+    "reached": [
+      "max_nested_zip_depth"
+    ]
+  },
+  "inventory": {
+    "status": "partial",
+    "members": [
+      {
+        "container_id": "container:0",
+        "member_id": "member:0",
+        "parent_member_id": null,
+        "name": "/tmp/\u202eevil.py",
+        "duplicate_ordinal": 1,
+        "kind": "file",
+        "compressed_size": 42,
+        "expanded_size": 50,
+        "read_status": "complete",
+        "integrity_status": "ok",
+        "issues": [
+          {
+            "code": "absolute_member_path",
+            "message": "The decoded member name has POSIX absolute-path syntax.",
+            "member_id": "member:0"
+          },
+          {
+            "code": "duplicate_member_name",
+            "message": "The decoded member name occurs twice in this container.",
+            "member_id": "member:0"
+          }
+        ]
+      },
+      {
+        "container_id": "container:0",
+        "member_id": "member:1",
+        "parent_member_id": null,
+        "name": "/tmp/\u202eevil.py",
+        "duplicate_ordinal": 2,
+        "kind": "file",
+        "compressed_size": 9,
+        "expanded_size": 7,
+        "read_status": "complete",
+        "integrity_status": "ok",
+        "issues": [
+          {
+            "code": "absolute_member_path",
+            "message": "The decoded member name has POSIX absolute-path syntax.",
+            "member_id": "member:1"
+          },
+          {
+            "code": "duplicate_member_name",
+            "message": "The decoded member name occurs twice in this container.",
+            "member_id": "member:1"
+          }
+        ]
+      },
+      {
+        "container_id": "container:0",
+        "member_id": "member:2",
+        "parent_member_id": null,
+        "name": "level1.zip",
+        "duplicate_ordinal": 1,
+        "kind": "zip",
+        "compressed_size": 1000,
+        "expanded_size": 1200,
+        "read_status": "complete",
+        "integrity_status": "ok",
+        "issues": []
+      },
+      {
+        "container_id": "container:1",
+        "member_id": "member:3",
+        "parent_member_id": "member:2",
+        "name": "level2.zip",
+        "duplicate_ordinal": 1,
+        "kind": "zip",
+        "compressed_size": 800,
+        "expanded_size": 950,
+        "read_status": "complete",
+        "integrity_status": "ok",
+        "issues": []
+      },
+      {
+        "container_id": "container:2",
+        "member_id": "member:4",
+        "parent_member_id": "member:3",
+        "name": "level3.zip",
+        "duplicate_ordinal": 1,
+        "kind": "zip",
+        "compressed_size": 600,
+        "expanded_size": 700,
+        "read_status": "complete",
+        "integrity_status": "ok",
+        "issues": []
+      },
+      {
+        "container_id": "container:3",
+        "member_id": "member:5",
+        "parent_member_id": "member:4",
+        "name": "level4.zip",
+        "duplicate_ordinal": 1,
+        "kind": "zip",
+        "compressed_size": 400,
+        "expanded_size": 500,
+        "read_status": "unsupported",
+        "integrity_status": "not_checked",
+        "issues": [
+          {
+            "code": "nested_zip_depth_limit",
+            "message": "The nested ZIP was inventoried but not opened beyond depth 3.",
+            "member_id": "member:5"
+          }
+        ]
+      },
+      {
+        "container_id": "container:0",
+        "member_id": "member:6",
+        "parent_member_id": null,
+        "name": "requirements.txt",
+        "duplicate_ordinal": 1,
+        "kind": "file",
+        "compressed_size": 7,
+        "expanded_size": 6,
+        "read_status": "complete",
+        "integrity_status": "ok",
+        "issues": []
+      }
+    ],
+    "issues": [
+      {
+        "code": "nested_zip_depth_limit",
+        "message": "At least one nested ZIP was inventoried but not opened beyond depth 3.",
+        "member_id": "member:5"
+      }
+    ]
+  },
+  "source_index": [
+    {
+      "source_id": "source:0",
+      "member_id": "member:0",
+      "form": "python_file",
+      "status": "inspected",
+      "cell": null,
+      "language": "python",
+      "reason_code": null
+    },
+    {
+      "source_id": "source:1",
+      "member_id": "member:1",
+      "form": "python_file",
+      "status": "error",
+      "cell": null,
+      "language": "python",
+      "reason_code": "syntax_error"
+    },
+    {
+      "source_id": "source:2",
+      "member_id": "member:6",
+      "form": "requirements",
+      "status": "inspected",
+      "cell": null,
+      "language": null,
+      "reason_code": null
+    }
+  ],
+  "rule_results": [
+    {
+      "rule_id": "archive.structure",
+      "status": "partial",
+      "evidence": [],
+      "observations": [
+        {
+          "observation_id": "observation:0",
+          "rule_id": "archive.structure",
+          "kind": "finding",
+          "condition_code": "absolute_member_path",
+          "member_id": "member:0",
+          "source_id": null,
+          "line": null,
+          "cell": null,
+          "snippet": "/tmp/\u202eevil.py",
+          "snippet_truncated": false,
+          "evidence_ids": []
+        },
+        {
+          "observation_id": "observation:1",
+          "rule_id": "archive.structure",
+          "kind": "finding",
+          "condition_code": "duplicate_member_name",
+          "member_id": "member:1",
+          "source_id": null,
+          "line": null,
+          "cell": null,
+          "snippet": "/tmp/\u202eevil.py",
+          "snippet_truncated": false,
+          "evidence_ids": []
+        },
+        {
+          "observation_id": "observation:2",
+          "rule_id": "archive.structure",
+          "kind": "finding",
+          "condition_code": "resource_limit_reached",
+          "member_id": "member:5",
+          "source_id": null,
+          "line": null,
+          "cell": null,
+          "snippet": "level4.zip",
+          "snippet_truncated": false,
+          "evidence_ids": []
+        }
+      ],
+      "skipped_inputs": [
+        {
+          "member_id": "member:5",
+          "source_id": null,
+          "reason_code": "nested_zip_depth_limit",
+          "message": "The nested ZIP was not opened beyond depth 3."
+        }
+      ],
+      "failed_inputs": []
+    },
+    {
+      "rule_id": "python.absolute-path",
+      "status": "partial",
+      "evidence": [],
+      "observations": [
+        {
+          "observation_id": "observation:3",
+          "rule_id": "python.absolute-path",
+          "kind": "finding",
+          "condition_code": "posix_absolute_path",
+          "member_id": "member:0",
+          "source_id": "source:0",
+          "line": 2,
+          "cell": null,
+          "snippet": "open(\"/srv/project/data.csv\")",
+          "snippet_truncated": false,
+          "evidence_ids": []
+        }
+      ],
+      "skipped_inputs": [],
+      "failed_inputs": [
+        {
+          "member_id": "member:1",
+          "source_id": "source:1",
+          "reason_code": "syntax_error",
+          "message": "The running Python parser rejected this source."
+        }
+      ]
+    },
+    {
+      "rule_id": "python.dependencies",
+      "status": "partial",
+      "evidence": [
+        {
+          "evidence_id": "evidence:0",
+          "kind": "python_import",
+          "member_id": "member:0",
+          "source_id": "source:0",
+          "line": 1,
+          "cell": null,
+          "value": "pandas",
+          "related_evidence_ids": []
+        },
+        {
+          "evidence_id": "evidence:1",
+          "kind": "dependency_declaration",
+          "member_id": "member:6",
+          "source_id": "source:2",
+          "line": 1,
+          "cell": null,
+          "value": "numpy",
+          "related_evidence_ids": []
+        }
+      ],
+      "observations": [
+        {
+          "observation_id": "observation:4",
+          "rule_id": "python.dependencies",
+          "kind": "needs_human_review",
+          "condition_code": "import_without_exact_declaration",
+          "member_id": "member:0",
+          "source_id": "source:0",
+          "line": 1,
+          "cell": null,
+          "snippet": "import pandas",
+          "snippet_truncated": false,
+          "evidence_ids": [
+            "evidence:0"
+          ]
+        },
+        {
+          "observation_id": "observation:5",
+          "rule_id": "python.dependencies",
+          "kind": "needs_human_review",
+          "condition_code": "declaration_without_exact_import",
+          "member_id": "member:6",
+          "source_id": "source:2",
+          "line": 1,
+          "cell": null,
+          "snippet": "numpy",
+          "snippet_truncated": false,
+          "evidence_ids": [
+            "evidence:1"
+          ]
+        }
+      ],
+      "skipped_inputs": [],
+      "failed_inputs": [
+        {
+          "member_id": "member:1",
+          "source_id": "source:1",
+          "reason_code": "syntax_error",
+          "message": "Imports could not be read from this source."
+        }
+      ]
+    }
+  ]
+}

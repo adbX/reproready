@@ -56,6 +56,15 @@ uv run reproready score examples/demo-artifact --json
 
 Use `uv sync --extra llm` when developing the optional model integration.
 
+## Checker under development
+
+The separate read-only checker is being specified before implementation. Its
+[`reproready check` guide](docs/checker.md),
+[`python-v1` ruleset](docs/checker-ruleset-v1.md), and
+[versioned JSON Schema](src/reproready/schemas/check-report-v1.schema.json) are
+available for review. The command and `check_path()` API are not available yet;
+the existing score command and API remain unchanged.
+
 ## License
 
 ReproReady is available under the [MIT License](LICENSE).

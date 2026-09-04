@@ -1,0 +1,98 @@
+{
+  "schema_version": "1",
+  "tool_version": "0.2.0.dev0",
+  "ruleset_version": "python-v1",
+  "artifact": {
+    "display_name": "changing.py",
+    "detected_kind": "unclassified",
+    "size_bytes": 21,
+    "sha256": null,
+    "snapshot_complete": false
+  },
+  "runtime": {
+    "system": "linux",
+    "python": {
+      "implementation": "CPython",
+      "version": "3.13.7"
+    },
+    "parsers": []
+  },
+  "limits": {
+    "effective": {
+      "max_input_bytes": 2147483648,
+      "max_member_count": 100000,
+      "max_nested_zip_depth": 3,
+      "max_expanded_bytes_per_member": 536870912,
+      "max_expanded_bytes_total": 4294967296,
+      "max_python_source_bytes": 8388608,
+      "max_notebook_bytes": 33554432,
+      "max_dependency_file_bytes": 8388608,
+      "max_worker_rss_bytes": 1073741824,
+      "max_temporary_bytes": 4294967296,
+      "max_elapsed_seconds": 120,
+      "max_observations": 10000,
+      "max_report_bytes": 67108864,
+      "max_snippet_codepoints": 240
+    },
+    "reached": []
+  },
+  "inventory": {
+    "status": "error",
+    "members": [],
+    "issues": [
+      {
+        "code": "source_changed",
+        "message": "The source identity or modification state changed while it was copied.",
+        "member_id": null
+      }
+    ]
+  },
+  "source_index": [],
+  "rule_results": [
+    {
+      "rule_id": "archive.structure",
+      "status": "error",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": [
+        {
+          "member_id": null,
+          "source_id": null,
+          "reason_code": "source_changed",
+          "message": "No archive inspection ran because the source changed during snapshotting."
+        }
+      ]
+    },
+    {
+      "rule_id": "python.absolute-path",
+      "status": "error",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": [
+        {
+          "member_id": null,
+          "source_id": null,
+          "reason_code": "source_changed",
+          "message": "No Python inspection ran because the source changed during snapshotting."
+        }
+      ]
+    },
+    {
+      "rule_id": "python.dependencies",
+      "status": "error",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": [
+        {
+          "member_id": null,
+          "source_id": null,
+          "reason_code": "source_changed",
+          "message": "No dependency inspection ran because the source changed during snapshotting."
+        }
+      ]
+    }
+  ]
+}

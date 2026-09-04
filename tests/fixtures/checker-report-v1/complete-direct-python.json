@@ -1,0 +1,86 @@
+{
+  "schema_version": "1",
+  "tool_version": "0.2.0.dev0",
+  "ruleset_version": "python-v1",
+  "artifact": {
+    "display_name": "clean.py",
+    "detected_kind": "direct_python",
+    "size_bytes": 12,
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "snapshot_complete": true
+  },
+  "runtime": {
+    "system": "linux",
+    "python": {
+      "implementation": "CPython",
+      "version": "3.13.7"
+    },
+    "parsers": [
+      {
+        "name": "ast",
+        "version": "3.13.7"
+      }
+    ]
+  },
+  "limits": {
+    "effective": {
+      "max_input_bytes": 2147483648,
+      "max_member_count": 100000,
+      "max_nested_zip_depth": 3,
+      "max_expanded_bytes_per_member": 536870912,
+      "max_expanded_bytes_total": 4294967296,
+      "max_python_source_bytes": 8388608,
+      "max_notebook_bytes": 33554432,
+      "max_dependency_file_bytes": 8388608,
+      "max_worker_rss_bytes": 1073741824,
+      "max_temporary_bytes": 4294967296,
+      "max_elapsed_seconds": 120,
+      "max_observations": 10000,
+      "max_report_bytes": 67108864,
+      "max_snippet_codepoints": 240
+    },
+    "reached": []
+  },
+  "inventory": {
+    "status": "complete",
+    "members": [],
+    "issues": []
+  },
+  "source_index": [
+    {
+      "source_id": "source:0",
+      "member_id": null,
+      "form": "python_file",
+      "status": "inspected",
+      "cell": null,
+      "language": "python",
+      "reason_code": null
+    }
+  ],
+  "rule_results": [
+    {
+      "rule_id": "archive.structure",
+      "status": "not_applicable",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": []
+    },
+    {
+      "rule_id": "python.absolute-path",
+      "status": "complete",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": []
+    },
+    {
+      "rule_id": "python.dependencies",
+      "status": "complete",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": []
+    }
+  ]
+}

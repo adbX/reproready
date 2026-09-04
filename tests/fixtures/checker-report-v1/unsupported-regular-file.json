@@ -1,0 +1,98 @@
+{
+  "schema_version": "1",
+  "tool_version": "0.2.0.dev0",
+  "ruleset_version": "python-v1",
+  "artifact": {
+    "display_name": "paper.pdf",
+    "detected_kind": "unsupported_pdf",
+    "size_bytes": 18,
+    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "snapshot_complete": true
+  },
+  "runtime": {
+    "system": "linux",
+    "python": {
+      "implementation": "CPython",
+      "version": "3.13.7"
+    },
+    "parsers": []
+  },
+  "limits": {
+    "effective": {
+      "max_input_bytes": 2147483648,
+      "max_member_count": 100000,
+      "max_nested_zip_depth": 3,
+      "max_expanded_bytes_per_member": 536870912,
+      "max_expanded_bytes_total": 4294967296,
+      "max_python_source_bytes": 8388608,
+      "max_notebook_bytes": 33554432,
+      "max_dependency_file_bytes": 8388608,
+      "max_worker_rss_bytes": 1073741824,
+      "max_temporary_bytes": 4294967296,
+      "max_elapsed_seconds": 120,
+      "max_observations": 10000,
+      "max_report_bytes": 67108864,
+      "max_snippet_codepoints": 240
+    },
+    "reached": []
+  },
+  "inventory": {
+    "status": "unsupported",
+    "members": [],
+    "issues": [
+      {
+        "code": "unsupported_format",
+        "message": "The regular file has PDF syntax, which is unsupported in v1.",
+        "member_id": null
+      }
+    ]
+  },
+  "source_index": [],
+  "rule_results": [
+    {
+      "rule_id": "archive.structure",
+      "status": "unsupported",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [
+        {
+          "member_id": null,
+          "source_id": null,
+          "reason_code": "unsupported_format",
+          "message": "The top-level regular file is not ZIP or ZIP64."
+        }
+      ],
+      "failed_inputs": []
+    },
+    {
+      "rule_id": "python.absolute-path",
+      "status": "unsupported",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [
+        {
+          "member_id": null,
+          "source_id": null,
+          "reason_code": "unsupported_format",
+          "message": "The top-level regular file is not a supported Python input."
+        }
+      ],
+      "failed_inputs": []
+    },
+    {
+      "rule_id": "python.dependencies",
+      "status": "unsupported",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [
+        {
+          "member_id": null,
+          "source_id": null,
+          "reason_code": "unsupported_format",
+          "message": "The top-level regular file is not a supported dependency or Python input."
+        }
+      ],
+      "failed_inputs": []
+    }
+  ]
+}

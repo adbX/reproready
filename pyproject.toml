@@ -19,8 +19,7 @@ classifiers = [
 
 # The score modules are standard-library only. `rich` is used solely by the CLI
 # renderer; `anthropic` (the `llm` extra) solely by the optional Validation call.
-# The checker modules planned beside the score may add pinned runtime
-# dependencies and an optional `review` extra.
+# Checker runtime dependencies are added only when implementation requires them.
 dependencies = [
     "rich>=13.0",
 ]
@@ -38,6 +37,7 @@ Changelog = "https://github.com/adbX/reproready/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
+    "jsonschema>=4.23",
     "pytest>=8.3",
     "ruff>=0.15",
 ]
@@ -45,6 +45,9 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build]
+exclude = ["/.rumdl_cache"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/reproready"]

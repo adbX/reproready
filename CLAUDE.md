@@ -7,7 +7,7 @@ readiness, not executability.
 
 ## Layout
 
-```
+```text
 src/reproready/        # the package
   inventory.py         # archive/dir walker → RawEntry list (the public reader)
   routing.py           # basename → (stage, channel) routing table
@@ -20,6 +20,8 @@ src/reproready/        # the package
   prompts.py           # the optional Validation model call (prompt + parsing)
   validation.py        # promote-only Validation flow over a report
   cli.py               # `reproready score`
+  schemas/             # packaged checker report schemas
+docs/                  # public checker guide and versioned ruleset
 tests/                 # pytest suite (mirrors each module) + test_e2e.py
 examples/demo-artifact # a synthetic, well-formed artifact used by the e2e test
 ```
@@ -45,10 +47,10 @@ CI runs lint and a Python 3.10/3.12/3.13 pytest matrix.
   outside the stdlib, and that stays true so the released score remains
   reproducible. `rich` is used only by `cli.py`; `anthropic` only by the
   optional Validation call (`validation.py`, lazily imported behind the `llm`
-  extra). The rule covers the score modules, not the package: the checker
-  modules planned beside them may carry pinned runtime dependencies, such as a
-  grammar-pinned Python parser in the core and a strict YAML parser plus schema
-  validator behind a `review` extra.
+  extra). The rule covers the score modules, not the package. Checker runtime
+  dependencies are added only when implementation requires them. `jsonschema`
+  is currently a development-only dependency used to test the public report
+  schema; the released checker does not expose a schema-validation workflow.
 - **`score_path` is the whole pipeline in memory**: inventory → junk filter →
   route → scope → targeted byte reads → evidence → rubric → aggregate, returning
   an `ArtifactReport`. No database, no persistence.
@@ -72,3 +74,8 @@ CI runs lint and a Python 3.10/3.12/3.13 pytest matrix.
 - Minimal, clean Python (YAGNI, KISS). Keep dependencies minimal.
 - The demo artifact under `examples/` doubles as the golden e2e fixture; changing
   its files changes the pinned e2e expectations.
+- The checker report contract lives in
+  `src/reproready/schemas/check-report-v1.schema.json`; its rule semantics live
+  in `docs/checker-ruleset-v1.md`. Synthetic JSON examples under
+  `tests/fixtures/checker-report-v1/` exercise the contract without containing
+  third-party artifact data.

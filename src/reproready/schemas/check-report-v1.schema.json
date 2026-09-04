@@ -1,0 +1,971 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/adbX/reproready/main/src/reproready/schemas/check-report-v1.schema.json",
+  "title": "ReproReady checker report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "tool_version",
+    "ruleset_version",
+    "artifact",
+    "runtime",
+    "limits",
+    "inventory",
+    "source_index",
+    "rule_results"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "tool_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "ruleset_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "artifact": {
+      "$ref": "#/$defs/artifact"
+    },
+    "runtime": {
+      "$ref": "#/$defs/runtime"
+    },
+    "limits": {
+      "$ref": "#/$defs/limits"
+    },
+    "inventory": {
+      "$ref": "#/$defs/inventory"
+    },
+    "source_index": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "rule_results": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 11,
+      "prefixItems": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/rule_result"
+            },
+            {
+              "properties": {
+                "rule_id": {
+                  "const": "archive.structure"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/rule_result"
+            },
+            {
+              "properties": {
+                "rule_id": {
+                  "const": "python.absolute-path"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/rule_result"
+            },
+            {
+              "properties": {
+                "rule_id": {
+                  "const": "python.dependencies"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "items": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/rule_result"
+          },
+          {
+            "properties": {
+              "rule_id": {
+                "not": {
+                  "enum": [
+                    "archive.structure",
+                    "python.absolute-path",
+                    "python.dependencies"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "display_name",
+        "detected_kind",
+        "size_bytes",
+        "sha256",
+        "snapshot_complete"
+      ],
+      "properties": {
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^[^/]+$"
+        },
+        "detected_kind": {
+          "enum": [
+            "unclassified",
+            "direct_python",
+            "direct_notebook",
+            "direct_requirements",
+            "direct_pyproject",
+            "zip",
+            "unsupported_tar",
+            "unsupported_gzip",
+            "unsupported_pdf",
+            "unsupported_docx",
+            "unsupported_regular"
+          ]
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_complete": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "snapshot_complete": {
+                "const": true
+              }
+            },
+            "required": [
+              "snapshot_complete"
+            ]
+          },
+          "then": {
+            "properties": {
+              "detected_kind": {
+                "not": {
+                  "const": "unclassified"
+                }
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "detected_kind": {
+                "const": "unclassified"
+              },
+              "sha256": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "system",
+        "python",
+        "parsers"
+      ],
+      "properties": {
+        "system": {
+          "enum": [
+            "macos",
+            "linux"
+          ]
+        },
+        "python": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "implementation",
+            "version"
+          ],
+          "properties": {
+            "implementation": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          }
+        },
+        "parsers": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "version"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            }
+          }
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "effective",
+        "reached"
+      ],
+      "properties": {
+        "effective": {
+          "$ref": "#/$defs/effective_limits"
+        },
+        "reached": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/limit_name"
+          }
+        }
+      }
+    },
+    "effective_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_input_bytes",
+        "max_member_count",
+        "max_nested_zip_depth",
+        "max_expanded_bytes_per_member",
+        "max_expanded_bytes_total",
+        "max_python_source_bytes",
+        "max_notebook_bytes",
+        "max_dependency_file_bytes",
+        "max_worker_rss_bytes",
+        "max_temporary_bytes",
+        "max_elapsed_seconds",
+        "max_observations",
+        "max_report_bytes",
+        "max_snippet_codepoints"
+      ],
+      "properties": {
+        "max_input_bytes": {
+          "const": 2147483648
+        },
+        "max_member_count": {
+          "const": 100000
+        },
+        "max_nested_zip_depth": {
+          "const": 3
+        },
+        "max_expanded_bytes_per_member": {
+          "const": 536870912
+        },
+        "max_expanded_bytes_total": {
+          "const": 4294967296
+        },
+        "max_python_source_bytes": {
+          "const": 8388608
+        },
+        "max_notebook_bytes": {
+          "const": 33554432
+        },
+        "max_dependency_file_bytes": {
+          "const": 8388608
+        },
+        "max_worker_rss_bytes": {
+          "const": 1073741824
+        },
+        "max_temporary_bytes": {
+          "const": 4294967296
+        },
+        "max_elapsed_seconds": {
+          "const": 120
+        },
+        "max_observations": {
+          "const": 10000
+        },
+        "max_report_bytes": {
+          "const": 67108864
+        },
+        "max_snippet_codepoints": {
+          "const": 240
+        }
+      }
+    },
+    "limit_name": {
+      "enum": [
+        "max_input_bytes",
+        "max_member_count",
+        "max_nested_zip_depth",
+        "max_expanded_bytes_per_member",
+        "max_expanded_bytes_total",
+        "max_python_source_bytes",
+        "max_notebook_bytes",
+        "max_dependency_file_bytes",
+        "max_worker_rss_bytes",
+        "max_temporary_bytes",
+        "max_elapsed_seconds",
+        "max_observations",
+        "max_report_bytes"
+      ]
+    },
+    "inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "members",
+        "issues"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "complete",
+            "partial",
+            "unsupported",
+            "error"
+          ]
+        },
+        "members": {
+          "type": "array",
+          "maxItems": 100000,
+          "items": {
+            "$ref": "#/$defs/member"
+          }
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/issue"
+          }
+        }
+      }
+    },
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "container_id",
+        "member_id",
+        "parent_member_id",
+        "name",
+        "duplicate_ordinal",
+        "kind",
+        "compressed_size",
+        "expanded_size",
+        "read_status",
+        "integrity_status",
+        "issues"
+      ],
+      "properties": {
+        "container_id": {
+          "$ref": "#/$defs/container_id"
+        },
+        "member_id": {
+          "$ref": "#/$defs/member_id"
+        },
+        "parent_member_id": {
+          "$ref": "#/$defs/nullable_member_id"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 65535
+        },
+        "duplicate_ordinal": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "enum": [
+            "file",
+            "directory",
+            "zip",
+            "symlink",
+            "special",
+            "unknown"
+          ]
+        },
+        "compressed_size": {
+          "$ref": "#/$defs/nullable_nonnegative_integer"
+        },
+        "expanded_size": {
+          "$ref": "#/$defs/nullable_nonnegative_integer"
+        },
+        "read_status": {
+          "enum": [
+            "complete",
+            "partial",
+            "not_read",
+            "unsupported",
+            "error"
+          ]
+        },
+        "integrity_status": {
+          "enum": [
+            "not_checked",
+            "ok",
+            "error"
+          ]
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/issue"
+          }
+        }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message",
+        "member_id"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/code"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "member_id": {
+          "$ref": "#/$defs/nullable_member_id"
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "member_id",
+        "form",
+        "status",
+        "cell",
+        "language",
+        "reason_code"
+      ],
+      "properties": {
+        "source_id": {
+          "$ref": "#/$defs/source_id"
+        },
+        "member_id": {
+          "$ref": "#/$defs/nullable_member_id"
+        },
+        "form": {
+          "enum": [
+            "python_file",
+            "notebook_document",
+            "notebook_code_cell",
+            "requirements",
+            "pyproject",
+            "unsupported_source"
+          ]
+        },
+        "status": {
+          "enum": [
+            "inspected",
+            "skipped",
+            "unsupported",
+            "error"
+          ]
+        },
+        "cell": {
+          "$ref": "#/$defs/nullable_positive_integer"
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "reason_code": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/code"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "inspected"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason_code": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "reason_code": {
+                "$ref": "#/$defs/code"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "rule_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_id",
+        "status",
+        "evidence",
+        "observations",
+        "skipped_inputs",
+        "failed_inputs"
+      ],
+      "properties": {
+        "rule_id": {
+          "$ref": "#/$defs/rule_id"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "partial",
+            "unsupported",
+            "error",
+            "not_applicable"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/observation"
+          }
+        },
+        "skipped_inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/coverage_item"
+          }
+        },
+        "failed_inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/coverage_item"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "complete"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "skipped_inputs": {
+                "maxItems": 0
+              },
+              "failed_inputs": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "partial"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "anyOf": [
+              {
+                "properties": {
+                  "skipped_inputs": {
+                    "minItems": 1
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "failed_inputs": {
+                    "minItems": 1
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "unsupported"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "maxItems": 0
+              },
+              "observations": {
+                "maxItems": 0
+              },
+              "skipped_inputs": {
+                "minItems": 1
+              },
+              "failed_inputs": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "error"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "maxItems": 0
+              },
+              "observations": {
+                "maxItems": 0
+              },
+              "failed_inputs": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "not_applicable"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "maxItems": 0
+              },
+              "observations": {
+                "maxItems": 0
+              },
+              "skipped_inputs": {
+                "maxItems": 0
+              },
+              "failed_inputs": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "kind",
+        "member_id",
+        "source_id",
+        "line",
+        "cell",
+        "value",
+        "related_evidence_ids"
+      ],
+      "properties": {
+        "evidence_id": {
+          "$ref": "#/$defs/evidence_id"
+        },
+        "kind": {
+          "$ref": "#/$defs/code"
+        },
+        "member_id": {
+          "$ref": "#/$defs/nullable_member_id"
+        },
+        "source_id": {
+          "$ref": "#/$defs/nullable_source_id"
+        },
+        "line": {
+          "$ref": "#/$defs/nullable_positive_integer"
+        },
+        "cell": {
+          "$ref": "#/$defs/nullable_positive_integer"
+        },
+        "value": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "related_evidence_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/evidence_id"
+          }
+        }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation_id",
+        "rule_id",
+        "kind",
+        "condition_code",
+        "member_id",
+        "source_id",
+        "line",
+        "cell",
+        "snippet",
+        "snippet_truncated",
+        "evidence_ids"
+      ],
+      "properties": {
+        "observation_id": {
+          "$ref": "#/$defs/observation_id"
+        },
+        "rule_id": {
+          "$ref": "#/$defs/rule_id"
+        },
+        "kind": {
+          "enum": [
+            "finding",
+            "needs_human_review"
+          ]
+        },
+        "condition_code": {
+          "$ref": "#/$defs/code"
+        },
+        "member_id": {
+          "$ref": "#/$defs/nullable_member_id"
+        },
+        "source_id": {
+          "$ref": "#/$defs/nullable_source_id"
+        },
+        "line": {
+          "$ref": "#/$defs/nullable_positive_integer"
+        },
+        "cell": {
+          "$ref": "#/$defs/nullable_positive_integer"
+        },
+        "snippet": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 240
+        },
+        "snippet_truncated": {
+          "type": "boolean"
+        },
+        "evidence_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/evidence_id"
+          }
+        }
+      }
+    },
+    "coverage_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "member_id",
+        "source_id",
+        "reason_code",
+        "message"
+      ],
+      "properties": {
+        "member_id": {
+          "$ref": "#/$defs/nullable_member_id"
+        },
+        "source_id": {
+          "$ref": "#/$defs/nullable_source_id"
+        },
+        "reason_code": {
+          "$ref": "#/$defs/code"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      }
+    },
+    "container_id": {
+      "type": "string",
+      "pattern": "^container:[0-9]+$"
+    },
+    "member_id": {
+      "type": "string",
+      "pattern": "^member:[0-9]+$"
+    },
+    "nullable_member_id": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/member_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "source_id": {
+      "type": "string",
+      "pattern": "^source:[0-9]+$"
+    },
+    "nullable_source_id": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/source_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "evidence_id": {
+      "type": "string",
+      "pattern": "^evidence:[0-9]+$"
+    },
+    "observation_id": {
+      "type": "string",
+      "pattern": "^observation:[0-9]+$"
+    },
+    "rule_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$",
+      "maxLength": 128
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$",
+      "maxLength": 128
+    },
+    "nullable_nonnegative_integer": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "nullable_positive_integer": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    }
+  }
+}
