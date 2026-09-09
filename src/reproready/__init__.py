@@ -8,7 +8,7 @@ whether the artifact removes the manual effort a reproduction would cost.
 
 The score modules are 100% standard library. ``rich`` is used only by the CLI
 and ``anthropic`` only by the optional Validation call (the ``llm`` extra). The
-checker modules planned beside the score may carry pinned runtime dependencies.
+checker modules beside the score may carry pinned runtime dependencies.
 
 Quickstart::
 

@@ -30,7 +30,7 @@ from reproready import check_path
 report = check_path("artifact.zip")
 ```
 
-The checker will run offline, will not import submitted modules, and will not extract entries to artifact-supplied paths. The parent process will hold a descriptor to the input, copy it into checker-owned temporary storage without following a top-level link, verify that the source did not change during the copy, and analyze only the completed snapshot. If the source changes, the parent produces a valid small report with `snapshot_complete: false`, detected kind `unclassified`, a null SHA-256, `source_changed` issues, and error rule results. That represented input failure exits 0.
+The implemented intake boundary holds a descriptor to the input, copies it into checker-owned temporary storage without following a top-level link, verifies that its identity, size, and modification state remain stable, and gives only the completed snapshot to one killable inspection child. The parent monitors the child against the fixed resident-memory and elapsed-time ceilings. If the source changes, the parent produces a valid small report with `snapshot_complete: false`, detected kind `unclassified`, a null SHA-256, `source_changed` issues, and error rule results. That represented input failure exits 0.
 
 ## Supported inputs
 
