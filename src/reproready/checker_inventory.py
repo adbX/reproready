@@ -1,0 +1,1395 @@
+"""Worker-side direct-file and recursive ZIP intake for the checker."""
+
+from __future__ import annotations
+
+import ast
+import codecs
+import json
+import os
+import re
+import stat
+import zipfile
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised only on Python 3.10.
+    import tomli as tomllib
+
+from .checker_intake import FIXED_LIMITS, SourceSnapshot, WorkerCheckpoint
+from .checker_report import classify_snapshot, encode_report, successful_intake_report
+
+_READ_CHUNK_BYTES = 1024 * 1024
+_REPORT_RESERVE_BYTES = 64 * 1024
+_SOURCE_FORMS = {
+    "direct_python": "python_file",
+    "direct_notebook": "notebook_document",
+    "direct_requirements": "requirements",
+    "direct_pyproject": "pyproject",
+}
+_UNREADABLE_SUFFIXES = (
+    ".zip",
+    ".tar",
+    ".tar.gz",
+    ".tgz",
+    ".gz",
+    ".pdf",
+    ".docx",
+)
+_REQUIREMENTS_NAME = re.compile(r"requirements.*\.txt", re.IGNORECASE)
+_BIDI_CODEPOINTS = {
+    0x061C,
+    0x200E,
+    0x200F,
+    *range(0x202A, 0x202F),
+    *range(0x2066, 0x206A),
+}
+_LIMIT_ISSUES = {
+    "max_member_count": (
+        "member_count_limit",
+        "The fixed member-count limit prevented complete inventory.",
+    ),
+    "max_nested_zip_depth": (
+        "nested_zip_depth_limit",
+        "At least one nested ZIP was inventoried but not opened beyond depth 3.",
+    ),
+    "max_expanded_bytes_per_member": (
+        "expanded_member_limit",
+        "A member exceeded the fixed expanded-byte limit.",
+    ),
+    "max_expanded_bytes_total": (
+        "expanded_total_limit",
+        "The fixed artifact-wide expanded-byte limit was reached.",
+    ),
+    "max_python_source_bytes": (
+        "python_source_limit",
+        "A Python source exceeded the fixed parser-input limit.",
+    ),
+    "max_notebook_bytes": (
+        "notebook_limit",
+        "A notebook exceeded the fixed parser-input limit.",
+    ),
+    "max_dependency_file_bytes": (
+        "dependency_file_limit",
+        "A dependency file exceeded the fixed parser-input limit.",
+    ),
+    "max_temporary_bytes": (
+        "temporary_storage_limit",
+        "The fixed checker-owned temporary-storage limit was reached.",
+    ),
+    "max_report_bytes": (
+        "report_size_limit",
+        "The fixed encoded-report limit prevented complete inventory.",
+    ),
+}
+
+
+class InventoryError(RuntimeError):
+    """A worker-side failure with a stable issue code and no artifact text."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+@dataclass(slots=True)
+class _Container:
+    container_id: str
+    path: Path
+    parent_member_id: str | None
+    depth: int
+
+
+@dataclass(slots=True)
+class _Target:
+    target_id: str
+    member_id: str | None
+    container_id: str | None
+    parent_member_id: str | None
+    name: str
+    duplicate_ordinal: int | None
+    kind: str
+    compressed_size: int | None
+    expanded_size: int | None
+    member: dict[str, object] | None
+    container: _Container | None = None
+    zip_info: zipfile.ZipInfo | None = None
+    cache_path: Path | None = None
+    text_valid: bool | None = None
+
+
+def _member_basename(name: str) -> str:
+    return name.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def _member_source_form(name: str) -> str | None:
+    basename = _member_basename(name)
+    folded = basename.casefold()
+    if folded.endswith(".py"):
+        return "python_file"
+    if folded.endswith(".ipynb"):
+        return "notebook_document"
+    if _REQUIREMENTS_NAME.fullmatch(basename):
+        return "requirements"
+    if folded == "pyproject.toml":
+        return "pyproject"
+    return None
+
+
+def _member_kind(info: zipfile.ZipInfo) -> str:
+    if info.is_dir():
+        return "directory"
+    mode = info.external_attr >> 16
+    file_type = stat.S_IFMT(mode)
+    if file_type == stat.S_IFLNK:
+        return "symlink"
+    if file_type not in {0, stat.S_IFREG}:
+        return "special"
+    return "file"
+
+
+def _path_issues(name: str) -> list[tuple[str, str]]:
+    issues: list[tuple[str, str]] = []
+    normalized = name.replace("\\", "/")
+    if name.startswith(("\\\\?\\", "\\\\.\\", "//?/", "//./")):
+        issues.append(
+            (
+                "absolute_member_path",
+                "The decoded member name has Windows device-path syntax.",
+            )
+        )
+    elif name.startswith(("\\\\", "//")):
+        issues.append(
+            (
+                "absolute_member_path",
+                "The decoded member name has Windows UNC-path syntax.",
+            )
+        )
+    elif re.match(r"^[A-Za-z]:[/\\]", name):
+        issues.append(
+            (
+                "absolute_member_path",
+                "The decoded member name has Windows drive-root syntax.",
+            )
+        )
+    elif name.startswith("/"):
+        issues.append(
+            (
+                "absolute_member_path",
+                "The decoded member name has POSIX absolute-path syntax.",
+            )
+        )
+    if ".." in normalized.split("/"):
+        issues.append(
+            (
+                "parent_path_segment",
+                "The decoded member name contains a parent-path segment.",
+            )
+        )
+    if any(ord(character) < 32 or ord(character) == 127 for character in name):
+        issues.append(
+            (
+                "control_character_in_name",
+                "The decoded member name contains a control character.",
+            )
+        )
+    return issues
+
+
+def _issue(code: str, message: str, member_id: str | None) -> dict[str, object]:
+    return {"code": code, "message": message, "member_id": member_id}
+
+
+def _source_record(
+    source_id: str,
+    member_id: str | None,
+    form: str,
+    status: str,
+    *,
+    cell: int | None = None,
+    language: str | None = None,
+    reason_code: str | None = None,
+) -> dict[str, object]:
+    return {
+        "source_id": source_id,
+        "member_id": member_id,
+        "form": form,
+        "status": status,
+        "cell": cell,
+        "language": language,
+        "reason_code": reason_code,
+    }
+
+
+def _display_text(value: str) -> str:
+    output: list[str] = []
+    for character in value:
+        codepoint = ord(character)
+        if character == "[":
+            output.append("\\[")
+        elif (
+            codepoint < 32
+            or codepoint == 127
+            or codepoint in _BIDI_CODEPOINTS
+            or 0xD800 <= codepoint <= 0xDFFF
+        ):
+            output.append(f"\\u{codepoint:04x}")
+        else:
+            output.append(character)
+    return "".join(output)
+
+
+def _bounded_display(value: str) -> tuple[str, bool]:
+    escaped = _display_text(value)
+    limit = 240
+    if len(escaped) <= limit:
+        return escaped, False
+    return escaped[:limit], True
+
+
+class InspectionEngine:
+    """Own one completed snapshot, its inventory, and cumulative read budgets."""
+
+    def __init__(
+        self,
+        snapshot: SourceSnapshot,
+        checkpoint: WorkerCheckpoint,
+        cache_root: Path,
+    ) -> None:
+        self.snapshot = snapshot
+        self.checkpoint = checkpoint
+        self.cache_root = cache_root
+        self.detected_kind = classify_snapshot(snapshot.display_name, snapshot.path)
+        self.parsers: set[str] = set()
+        self.reached_limits: list[str] = []
+        self.inventory_issues: list[dict[str, object]] = []
+        self.members: list[dict[str, object]] = []
+        self.sources: list[dict[str, object]] = []
+        self.targets: list[_Target] = []
+        self.target_by_id: dict[str, _Target] = {}
+        self.containers: list[_Container] = []
+        self.expanded_bytes = 0
+        self.temporary_bytes = snapshot.size_bytes
+        self.inventory_status = "complete"
+        self._stop_inventory = False
+        self._cursor_number = 0
+        self._cursors: dict[str, tuple[Any, ...]] = {}
+
+    def inspect(self) -> dict[str, object]:
+        """Build bounded direct or ZIP intake and return its report object."""
+
+        self.checkpoint("after_source_read")
+        if self.detected_kind in _SOURCE_FORMS:
+            self._inspect_direct()
+        elif self.detected_kind == "zip":
+            self.parsers.add("zipfile")
+            self._inspect_zip()
+        else:
+            self.inventory_status = "unsupported"
+            syntax = self.detected_kind.removeprefix("unsupported_").replace("_", " ")
+            self.inventory_issues.append(
+                _issue(
+                    "unsupported_format",
+                    f"The regular file has {syntax} syntax, which is unsupported in v1.",
+                    None,
+                )
+            )
+            self._add_target(
+                _Target(
+                    "artifact",
+                    None,
+                    None,
+                    None,
+                    self.snapshot.display_name,
+                    None,
+                    "unknown",
+                    None,
+                    self.snapshot.size_bytes,
+                    None,
+                    cache_path=self.snapshot.path,
+                )
+            )
+        report = successful_intake_report(
+            self.snapshot,
+            detected_kind=self.detected_kind,
+            parsers=self.parsers,
+            reached_limits=self.reached_limits,
+            inventory_status=self.inventory_status,
+            members=self.members,
+            issues=self.inventory_issues,
+            source_index=self.sources,
+        )
+        if len(encode_report(report)) > FIXED_LIMITS["max_report_bytes"]:
+            raise InventoryError(
+                "max_report_bytes",
+                "The bounded inventory could not fit in the fixed report limit.",
+            )
+        return report
+
+    def _inspect_direct(self) -> None:
+        form = _SOURCE_FORMS[self.detected_kind]
+        target = _Target(
+            "artifact",
+            None,
+            None,
+            None,
+            self.snapshot.display_name,
+            None,
+            "file",
+            None,
+            self.snapshot.size_bytes,
+            None,
+            cache_path=self.snapshot.path,
+        )
+        self._add_target(target)
+        self._inspect_source(target, form, direct=True)
+        if self.reached_limits:
+            self.inventory_status = "partial"
+
+    def _inspect_zip(self) -> None:
+        outer = _Container("container:0", self.snapshot.path, None, 0)
+        self.containers.append(outer)
+        try:
+            self._walk_container(outer)
+        except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile):
+            self.inventory_issues.append(
+                _issue(
+                    "central_directory_error",
+                    "The ZIP central directory could not be read completely.",
+                    outer.parent_member_id,
+                )
+            )
+            self.inventory_status = "partial" if self.members else "error"
+        if self.reached_limits and self.inventory_status == "complete":
+            self.inventory_status = "partial"
+
+    def _walk_container(self, container: _Container) -> None:
+        with zipfile.ZipFile(container.path) as archive:
+            infos = archive.infolist()
+            duplicate_counts = Counter(info.filename for info in infos)
+            duplicate_ordinals: Counter[str] = Counter()
+            for info in infos:
+                if self._stop_inventory:
+                    return
+                if len(self.members) >= FIXED_LIMITS["max_member_count"]:
+                    self._reach("max_member_count", None)
+                    self._stop_inventory = True
+                    return
+                duplicate_ordinals[info.filename] += 1
+                member_id = f"member:{len(self.members)}"
+                issues: list[dict[str, object]] = []
+                issues.extend(
+                    _issue(code, message, member_id)
+                    for code, message in _path_issues(info.filename)
+                )
+                if duplicate_counts[info.filename] > 1:
+                    issues.append(
+                        _issue(
+                            "duplicate_member_name",
+                            "The decoded member name occurs more than once in this container.",
+                            member_id,
+                        )
+                    )
+                kind = _member_kind(info)
+                if kind == "symlink":
+                    issues.append(
+                        _issue(
+                            "symlink_entry",
+                            "The archive entry is a symbolic link and was not followed.",
+                            member_id,
+                        )
+                    )
+                elif kind == "special":
+                    issues.append(
+                        _issue(
+                            "special_entry",
+                            "The archive entry is neither a regular file nor a directory.",
+                            member_id,
+                        )
+                    )
+                if info.flag_bits & 1:
+                    issues.append(
+                        _issue(
+                            "encrypted_entry",
+                            "The encrypted archive entry was not read.",
+                            member_id,
+                        )
+                    )
+                member = {
+                    "container_id": container.container_id,
+                    "member_id": member_id,
+                    "parent_member_id": container.parent_member_id,
+                    "name": info.filename,
+                    "duplicate_ordinal": duplicate_ordinals[info.filename],
+                    "kind": kind,
+                    "compressed_size": info.compress_size,
+                    "expanded_size": info.file_size,
+                    "read_status": (
+                        "unsupported"
+                        if kind in {"symlink", "special"} or info.flag_bits & 1
+                        else "not_read"
+                    ),
+                    "integrity_status": "not_checked",
+                    "issues": issues,
+                }
+                target = _Target(
+                    member_id,
+                    member_id,
+                    container.container_id,
+                    container.parent_member_id,
+                    info.filename,
+                    duplicate_ordinals[info.filename],
+                    kind,
+                    info.compress_size,
+                    info.file_size,
+                    member,
+                    container=container,
+                    zip_info=info,
+                )
+                self.members.append(member)
+                self._add_target(target)
+                if not self._compression_supported(target):
+                    continue
+                folded = _member_basename(info.filename).casefold()
+                if kind == "file" and folded.endswith(".zip"):
+                    self._inspect_nested_zip(target, container.depth)
+                form = _member_source_form(info.filename)
+                if form is not None and target.kind == "file":
+                    self._inspect_source(target, form, direct=False)
+
+    def _compression_supported(self, target: _Target) -> bool:
+        if target.kind != "file" or target.member is None:
+            return False
+        if any(issue["code"] == "encrypted_entry" for issue in target.member["issues"]):
+            return False
+        assert target.container is not None and target.zip_info is not None
+        try:
+            with (
+                zipfile.ZipFile(target.container.path) as archive,
+                archive.open(target.zip_info),
+            ):
+                pass
+        except NotImplementedError:
+            target.member["read_status"] = "unsupported"
+            target.member["issues"].append(
+                _issue(
+                    "unsupported_compression",
+                    "The archive entry uses an unsupported compression method.",
+                    target.member_id,
+                )
+            )
+            return False
+        except (OSError, RuntimeError, zipfile.BadZipFile):
+            target.member["read_status"] = "error"
+            target.member["integrity_status"] = "error"
+            target.member["issues"].append(
+                _issue(
+                    "member_read_error",
+                    "The archive entry could not be opened safely.",
+                    target.member_id,
+                )
+            )
+            return False
+        return True
+
+    def _inspect_nested_zip(self, target: _Target, parent_depth: int) -> None:
+        if parent_depth >= FIXED_LIMITS["max_nested_zip_depth"]:
+            assert target.member is not None
+            target.member["read_status"] = "unsupported"
+            target.member["issues"].append(
+                _issue(
+                    "nested_zip_depth_limit",
+                    "The nested ZIP was inventoried but not opened beyond depth 3.",
+                    target.member_id,
+                )
+            )
+            self._reach("max_nested_zip_depth", target.member_id)
+            return
+        cache = self._cache_target(target)
+        if cache is None:
+            return
+        if not zipfile.is_zipfile(cache):
+            return
+        assert target.member is not None
+        target.kind = "zip"
+        target.member["kind"] = "zip"
+        container = _Container(
+            f"container:{len(self.containers)}",
+            cache,
+            target.member_id,
+            parent_depth + 1,
+        )
+        self.containers.append(container)
+        try:
+            self._walk_container(container)
+        except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile):
+            target.member["issues"].append(
+                _issue(
+                    "central_directory_error",
+                    "The nested ZIP central directory could not be read completely.",
+                    target.member_id,
+                )
+            )
+            self.inventory_issues.append(
+                _issue(
+                    "central_directory_error",
+                    "A nested ZIP central directory could not be read completely.",
+                    target.member_id,
+                )
+            )
+            self.inventory_status = "partial"
+
+    def _cache_target(self, target: _Target) -> Path | None:
+        if target.cache_path is not None:
+            return target.cache_path
+        assert target.member is not None
+        assert target.container is not None and target.zip_info is not None
+        expected = target.expanded_size
+        if expected is not None:
+            if expected > FIXED_LIMITS["max_expanded_bytes_per_member"]:
+                self._member_limit(target, "max_expanded_bytes_per_member")
+                return None
+            if (
+                self.expanded_bytes + expected
+                > FIXED_LIMITS["max_expanded_bytes_total"]
+            ):
+                self._member_limit(target, "max_expanded_bytes_total")
+                return None
+            if self.temporary_bytes + expected > FIXED_LIMITS["max_temporary_bytes"]:
+                self._member_limit(target, "max_temporary_bytes")
+                return None
+        destination = self.cache_root / f"member-{target.member_id.split(':')[1]}.data"
+        partial = destination.with_suffix(".partial")
+        written = 0
+        try:
+            descriptor = os.open(
+                partial,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
+                stat.S_IRUSR | stat.S_IWUSR,
+            )
+            with (
+                os.fdopen(descriptor, "wb") as output,
+                zipfile.ZipFile(target.container.path) as archive,
+                archive.open(target.zip_info) as source,
+            ):
+                while chunk := source.read(_READ_CHUNK_BYTES):
+                    if (
+                        written + len(chunk)
+                        > FIXED_LIMITS["max_expanded_bytes_per_member"]
+                    ):
+                        self._member_limit(target, "max_expanded_bytes_per_member")
+                        return None
+                    if (
+                        self.expanded_bytes + len(chunk)
+                        > FIXED_LIMITS["max_expanded_bytes_total"]
+                    ):
+                        self._member_limit(target, "max_expanded_bytes_total")
+                        return None
+                    if (
+                        self.temporary_bytes + len(chunk)
+                        > FIXED_LIMITS["max_temporary_bytes"]
+                    ):
+                        self._member_limit(target, "max_temporary_bytes")
+                        return None
+                    output.write(chunk)
+                    written += len(chunk)
+                    self.expanded_bytes += len(chunk)
+                    self.temporary_bytes += len(chunk)
+            os.replace(partial, destination)
+            destination.chmod(stat.S_IRUSR)
+        except NotImplementedError:
+            target.member["read_status"] = "unsupported"
+            target.member["issues"].append(
+                _issue(
+                    "unsupported_compression",
+                    "The archive entry uses an unsupported compression method.",
+                    target.member_id,
+                )
+            )
+            return None
+        except (OSError, RuntimeError, zipfile.BadZipFile, EOFError):
+            target.member["read_status"] = "error"
+            target.member["integrity_status"] = "error"
+            target.member["issues"].append(
+                _issue(
+                    "integrity_error",
+                    "The archive entry could not be read and verified completely.",
+                    target.member_id,
+                )
+            )
+            return None
+        finally:
+            partial.unlink(missing_ok=True)
+        target.cache_path = destination
+        target.member["read_status"] = "complete"
+        target.member["integrity_status"] = "ok"
+        return destination
+
+    def _member_limit(self, target: _Target, limit: str) -> None:
+        assert target.member is not None
+        code, message = _LIMIT_ISSUES[limit]
+        target.member["read_status"] = "partial"
+        target.member["issues"].append(_issue(code, message, target.member_id))
+        self._reach(limit, target.member_id)
+
+    def _reach(self, limit: str, member_id: str | None) -> None:
+        if limit not in self.reached_limits:
+            self.reached_limits.append(limit)
+            code, message = _LIMIT_ISSUES[limit]
+            self.inventory_issues.append(_issue(code, message, member_id))
+        self.inventory_status = "partial"
+
+    def _inspect_source(self, target: _Target, form: str, *, direct: bool) -> None:
+        limit_name = {
+            "python_file": "max_python_source_bytes",
+            "notebook_document": "max_notebook_bytes",
+            "requirements": "max_dependency_file_bytes",
+            "pyproject": "max_dependency_file_bytes",
+        }[form]
+        size = target.expanded_size
+        source_id = f"source:{len(self.sources)}"
+        language = "python" if form == "python_file" else None
+        if size is not None and size > FIXED_LIMITS[limit_name]:
+            self.sources.append(
+                _source_record(
+                    source_id,
+                    target.member_id,
+                    form,
+                    "skipped",
+                    language=language,
+                    reason_code=limit_name,
+                )
+            )
+            self._reach(limit_name, target.member_id)
+            return
+        path = target.cache_path if direct else self._cache_target(target)
+        if path is None:
+            reason = self._target_reason(target)
+            self.sources.append(
+                _source_record(
+                    source_id,
+                    target.member_id,
+                    form,
+                    "error",
+                    language=language,
+                    reason_code=reason,
+                )
+            )
+            return
+        try:
+            body = path.read_bytes()
+            text = body.decode("utf-8")
+        except UnicodeDecodeError:
+            self.sources.append(
+                _source_record(
+                    source_id,
+                    target.member_id,
+                    form,
+                    "error",
+                    language=language,
+                    reason_code="decode_error",
+                )
+            )
+            target.text_valid = False
+            return
+        except OSError:
+            self.sources.append(
+                _source_record(
+                    source_id,
+                    target.member_id,
+                    form,
+                    "error",
+                    language=language,
+                    reason_code="member_read_error",
+                )
+            )
+            return
+        target.text_valid = True
+        if form == "python_file":
+            self.parsers.add("ast")
+            try:
+                ast.parse(text)
+            except SyntaxError:
+                self.sources.append(
+                    _source_record(
+                        source_id,
+                        target.member_id,
+                        form,
+                        "error",
+                        language="python",
+                        reason_code="syntax_error",
+                    )
+                )
+            else:
+                self.sources.append(
+                    _source_record(
+                        source_id,
+                        target.member_id,
+                        form,
+                        "inspected",
+                        language="python",
+                    )
+                )
+        elif form == "notebook_document":
+            self._inspect_notebook(target, text)
+        elif form == "pyproject":
+            self.parsers.add("tomllib")
+            try:
+                document = tomllib.loads(text)
+                project = document.get("project", {})
+                dependencies = project.get("dependencies", [])
+                if not isinstance(project, dict) or not isinstance(dependencies, list):
+                    raise TypeError
+                if any(not isinstance(item, str) for item in dependencies):
+                    raise TypeError
+            except (tomllib.TOMLDecodeError, TypeError, AttributeError):
+                self.sources.append(
+                    _source_record(
+                        source_id,
+                        target.member_id,
+                        form,
+                        "error",
+                        reason_code="dependency_parse_error",
+                    )
+                )
+            else:
+                self.sources.append(
+                    _source_record(source_id, target.member_id, form, "inspected")
+                )
+        else:
+            self.sources.append(
+                _source_record(source_id, target.member_id, form, "inspected")
+            )
+
+    def _inspect_notebook(self, target: _Target, text: str) -> None:
+        self.parsers.update({"ast", "json"})
+        document_id = f"source:{len(self.sources)}"
+        try:
+            document = json.loads(text)
+            if not isinstance(document, dict) or document.get("nbformat") != 4:
+                raise TypeError
+            cells = document.get("cells")
+            if not isinstance(cells, list):
+                raise TypeError
+        except (json.JSONDecodeError, TypeError):
+            self.sources.append(
+                _source_record(
+                    document_id,
+                    target.member_id,
+                    "notebook_document",
+                    "error",
+                    reason_code="notebook_parse_error",
+                )
+            )
+            return
+        languages = set()
+        metadata = document.get("metadata")
+        if isinstance(metadata, dict):
+            kernelspec = metadata.get("kernelspec")
+            language_info = metadata.get("language_info")
+            if isinstance(kernelspec, dict) and isinstance(
+                kernelspec.get("language"), str
+            ):
+                languages.add(kernelspec["language"].casefold())
+            if isinstance(language_info, dict) and isinstance(
+                language_info.get("name"), str
+            ):
+                languages.add(language_info["name"].casefold())
+        if languages != {"python"}:
+            self.sources.append(
+                _source_record(
+                    document_id,
+                    target.member_id,
+                    "notebook_document",
+                    "unsupported",
+                    language=next(iter(languages)) if len(languages) == 1 else None,
+                    reason_code="unsupported_notebook_language",
+                )
+            )
+            return
+        self.sources.append(
+            _source_record(
+                document_id,
+                target.member_id,
+                "notebook_document",
+                "inspected",
+                language="python",
+            )
+        )
+        for cell_number, cell in enumerate(cells, start=1):
+            if not isinstance(cell, dict) or cell.get("cell_type") != "code":
+                continue
+            source_id = f"source:{len(self.sources)}"
+            source = cell.get("source")
+            if isinstance(source, list) and all(
+                isinstance(item, str) for item in source
+            ):
+                source = "".join(source)
+            if not isinstance(source, str):
+                self.sources.append(
+                    _source_record(
+                        source_id,
+                        target.member_id,
+                        "notebook_code_cell",
+                        "error",
+                        cell=cell_number,
+                        language="python",
+                        reason_code="notebook_cell_source_error",
+                    )
+                )
+                continue
+            if len(source.encode("utf-8")) > FIXED_LIMITS["max_python_source_bytes"]:
+                self.sources.append(
+                    _source_record(
+                        source_id,
+                        target.member_id,
+                        "notebook_code_cell",
+                        "skipped",
+                        cell=cell_number,
+                        language="python",
+                        reason_code="max_python_source_bytes",
+                    )
+                )
+                self._reach("max_python_source_bytes", target.member_id)
+                continue
+            if any(
+                line.lstrip().startswith(("%", "!")) for line in source.splitlines()
+            ):
+                self.sources.append(
+                    _source_record(
+                        source_id,
+                        target.member_id,
+                        "notebook_code_cell",
+                        "unsupported",
+                        cell=cell_number,
+                        language="python",
+                        reason_code="unsupported_notebook_syntax",
+                    )
+                )
+                continue
+            try:
+                ast.parse(source)
+            except SyntaxError:
+                status, reason = "error", "syntax_error"
+            else:
+                status, reason = "inspected", None
+            self.sources.append(
+                _source_record(
+                    source_id,
+                    target.member_id,
+                    "notebook_code_cell",
+                    status,
+                    cell=cell_number,
+                    language="python",
+                    reason_code=reason,
+                )
+            )
+
+    def _target_reason(self, target: _Target) -> str:
+        if target.member is None:
+            return "member_read_error"
+        issues = target.member["issues"]
+        if issues:
+            return str(issues[-1]["code"])
+        return "member_read_error"
+
+    def _add_target(self, target: _Target) -> None:
+        self.targets.append(target)
+        self.target_by_id[target.target_id] = target
+
+    def report_bytes(self) -> bytes:
+        """Return the current schema-shaped intake report."""
+
+        return encode_report(
+            successful_intake_report(
+                self.snapshot,
+                detected_kind=self.detected_kind,
+                parsers=self.parsers,
+                reached_limits=self.reached_limits,
+                inventory_status=self.inventory_status,
+                members=self.members,
+                issues=self.inventory_issues,
+                source_index=self.sources,
+            )
+        )
+
+    def target_listing(self, target: _Target) -> dict[str, object]:
+        """Return bounded display metadata for one browser target."""
+
+        name_display, name_truncated = _bounded_display(target.name)
+        issue_codes = (
+            [str(item["code"]) for item in target.member["issues"]]
+            if target.member is not None
+            else []
+        )
+        reason = self._structural_skip_reason(target)
+        return {
+            "target_id": target.target_id,
+            "member_id": target.member_id,
+            "container_id": target.container_id,
+            "parent_member_id": target.parent_member_id,
+            "name_display": name_display,
+            "name_truncated": name_truncated,
+            "duplicate_ordinal": target.duplicate_ordinal,
+            "kind": target.kind,
+            "compressed_size": target.compressed_size,
+            "expanded_size": target.expanded_size,
+            "issue_codes": issue_codes,
+            "readable": reason is None,
+            "searchable": reason is None,
+        }
+
+    def _structural_skip_reason(self, target: _Target) -> str | None:
+        if target.member_id is None:
+            if self.detected_kind not in _SOURCE_FORMS:
+                return "unsupported_format"
+            return None
+        if target.kind == "directory":
+            return "directory"
+        if target.kind == "symlink":
+            return "link"
+        if target.kind == "special":
+            return "special_entry"
+        if target.kind == "zip":
+            return "unsupported_format"
+        assert target.member is not None
+        codes = {str(issue["code"]) for issue in target.member["issues"]}
+        if "encrypted_entry" in codes:
+            return "encrypted"
+        if "unsupported_compression" in codes:
+            return "unsupported_compression"
+        if _member_basename(target.name).casefold().endswith(_UNREADABLE_SUFFIXES):
+            return "unsupported_format"
+        return None
+
+    def ensure_text(self, target: _Target) -> tuple[Path | None, str | None]:
+        """Return a strict-UTF-8 checker-owned path or one closed skip reason."""
+
+        structural = self._structural_skip_reason(target)
+        if structural is not None:
+            return None, structural
+        path = target.cache_path
+        if path is None:
+            path = self._cache_target(target)
+        if path is None:
+            return None, self._target_reason(target)
+        if target.text_valid is False:
+            return None, "decode_error"
+        if target.text_valid is None:
+            decoder = codecs.getincrementaldecoder("utf-8")("strict")
+            try:
+                with path.open("rb") as handle:
+                    while chunk := handle.read(_READ_CHUNK_BYTES):
+                        decoder.decode(chunk)
+                    decoder.decode(b"", final=True)
+            except UnicodeDecodeError:
+                target.text_valid = False
+                return None, "decode_error"
+            except OSError:
+                return None, "member_read_error"
+            target.text_valid = True
+        return path, None
+
+    def new_cursor(self, state: tuple[Any, ...]) -> str:
+        self._cursor_number += 1
+        token = f"cursor:{self._cursor_number}"
+        self._cursors[token] = state
+        return token
+
+    def cursor_state(self, token: str, expected: tuple[Any, ...]) -> tuple[Any, ...]:
+        state = self._cursors.get(token)
+        if state is None or state[: len(expected)] != expected:
+            raise InventoryError("invalid_cursor", "The browser cursor is invalid.")
+        return state
+
+    def handle_browser_request(self, request: dict[str, object]) -> dict[str, object]:
+        """Execute one validated browser operation against cumulative state."""
+
+        operation = str(request["operation"])
+        if operation == "list_members":
+            return self._list_members(request)
+        if operation == "search_members":
+            return self._search_members(request)
+        if operation == "read_member":
+            return self._read_member(request)
+        raise InventoryError("invalid_request", "The browser request is invalid.")
+
+    def _common_response(
+        self,
+        operation: str,
+        status: str,
+        issues: list[dict[str, object]] | None = None,
+    ) -> dict[str, object]:
+        reached = [name for name in FIXED_LIMITS if name in set(self.reached_limits)]
+        return {
+            "status": status,
+            "reached_limits": reached,
+            "issues": issues or [],
+            "browser_version": "pilot-v1",
+            "artifact_sha256": self.snapshot.sha256,
+            "operation": operation,
+        }
+
+    @staticmethod
+    def _browser_issue(
+        code: str, target_id: str | None, message: str
+    ) -> dict[str, object]:
+        return {"code": code, "target_id": target_id, "message": message}
+
+    def _list_members(self, request: dict[str, object]) -> dict[str, object]:
+        cursor = request["cursor"]
+        if cursor is None:
+            start = 0
+        else:
+            state = self.cursor_state(str(cursor), ("list_members",))
+            start = int(state[1])
+        limit = int(request["limit"])
+        stop = min(start + limit, len(self.targets))
+        next_cursor = (
+            self.new_cursor(("list_members", stop))
+            if stop < len(self.targets)
+            else None
+        )
+        issues = []
+        status = "complete"
+        if self.inventory_status != "complete":
+            status = "partial"
+            issues.append(
+                self._browser_issue(
+                    "inventory_incomplete",
+                    None,
+                    "The checker inventory is incomplete.",
+                )
+            )
+        response = self._common_response("list_members", status, issues)
+        response.update(
+            {
+                "targets": [
+                    self.target_listing(target) for target in self.targets[start:stop]
+                ],
+                "next_cursor": next_cursor,
+                "inventory_complete": (
+                    next_cursor is None and self.inventory_status == "complete"
+                ),
+            }
+        )
+        return response
+
+    def _search_members(self, request: dict[str, object]) -> dict[str, object]:
+        target_id = str(request["target_id"])
+        query = str(request["query"])
+        cursor = request["cursor"]
+        limit = int(request["limit"])
+        selected = (
+            self.targets
+            if target_id == "all"
+            else [self.target_by_id[target_id]]
+            if target_id in self.target_by_id
+            else []
+        )
+        if not selected:
+            response = self._common_response(
+                "search_members",
+                "error",
+                [
+                    self._browser_issue(
+                        "target_not_found",
+                        target_id,
+                        "The requested browser target does not exist.",
+                    )
+                ],
+            )
+            response.update(
+                {
+                    "matches": [],
+                    "next_cursor": None,
+                    "search_complete": False,
+                    "searched_target_count": 0,
+                    "skipped_targets": [],
+                    "searched_bytes": 0,
+                }
+            )
+            return response
+        if cursor is None:
+            target_index, byte_offset, line = 0, 0, 1
+        else:
+            state = self.cursor_state(str(cursor), ("search_members", target_id, query))
+            target_index, byte_offset, line = (
+                int(state[3]),
+                int(state[4]),
+                int(state[5]),
+            )
+        matches: list[dict[str, object]] = []
+        skipped: list[dict[str, object]] = []
+        searched_targets = 0
+        searched_bytes = 0
+        next_cursor = None
+        while target_index < len(selected):
+            target = selected[target_index]
+            path, reason = self.ensure_text(target)
+            if path is None:
+                skipped.append({"target_id": target.target_id, "reason_code": reason})
+                target_index += 1
+                byte_offset, line = 0, 1
+                if len(skipped) >= 500:
+                    next_cursor = self.new_cursor(
+                        (
+                            "search_members",
+                            target_id,
+                            query,
+                            target_index,
+                            byte_offset,
+                            line,
+                        )
+                    )
+                    break
+                continue
+            searched_targets += 1
+            found, exhausted, next_byte, next_line, bytes_read = self._search_path(
+                path,
+                target.target_id,
+                query,
+                byte_offset,
+                line,
+                limit - len(matches),
+            )
+            matches.extend(found)
+            searched_bytes += bytes_read
+            if not exhausted:
+                next_cursor = self.new_cursor(
+                    (
+                        "search_members",
+                        target_id,
+                        query,
+                        target_index,
+                        next_byte,
+                        next_line,
+                    )
+                )
+                break
+            target_index += 1
+            byte_offset, line = 0, 1
+        search_complete = next_cursor is None and target_index >= len(selected)
+        status = (
+            "partial" if skipped or self.inventory_status != "complete" else "complete"
+        )
+        issues = []
+        if self.inventory_status != "complete":
+            issues.append(
+                self._browser_issue(
+                    "inventory_incomplete",
+                    None,
+                    "The checker inventory is incomplete.",
+                )
+            )
+        response = self._common_response("search_members", status, issues)
+        response.update(
+            {
+                "matches": matches,
+                "next_cursor": next_cursor,
+                "search_complete": search_complete,
+                "searched_target_count": searched_targets,
+                "skipped_targets": skipped,
+                "searched_bytes": searched_bytes,
+            }
+        )
+        return response
+
+    def _search_path(
+        self,
+        path: Path,
+        target_id: str,
+        query: str,
+        start_byte: int,
+        start_line: int,
+        limit: int,
+    ) -> tuple[list[dict[str, object]], bool, int, int, int]:
+        matches: list[dict[str, object]] = []
+        decoder = codecs.getincrementaldecoder("utf-8")("strict")
+        overlap = max(len(query) - 1, 240)
+        buffer = ""
+        buffer_byte = start_byte
+        buffer_line = start_line
+        bytes_read = 0
+        with path.open("rb") as handle:
+            handle.seek(start_byte)
+            while True:
+                chunk = handle.read(64 * 1024)
+                bytes_read += len(chunk)
+                end = not chunk
+                decoded = decoder.decode(chunk, final=end)
+                buffer += decoded
+                safe_end = len(buffer) if end else max(0, len(buffer) - overlap)
+                search_at = 0
+                while search_at < safe_end:
+                    index = buffer.find(query, search_at)
+                    if index < 0 or index >= safe_end:
+                        break
+                    prefix = buffer[:index]
+                    match_byte = buffer_byte + len(prefix.encode("utf-8"))
+                    match_line = buffer_line + prefix.count("\n")
+                    line_start = buffer.rfind("\n", 0, index) + 1
+                    line_end = buffer.find("\n", index + len(query))
+                    snippet_incomplete = False
+                    if line_end < 0:
+                        line_end = min(len(buffer), index + len(query) + 240)
+                        snippet_incomplete = not end
+                    snippet, truncated = _bounded_display(buffer[line_start:line_end])
+                    matches.append(
+                        {
+                            "target_id": target_id,
+                            "byte_offset": match_byte,
+                            "line": match_line,
+                            "snippet_display": snippet,
+                            "snippet_truncated": (
+                                truncated
+                                or snippet_incomplete
+                                or (line_start == 0 and buffer_byte > 0)
+                            ),
+                        }
+                    )
+                    first = query[0]
+                    next_byte = match_byte + len(first.encode("utf-8"))
+                    next_line = match_line + (1 if first == "\n" else 0)
+                    if len(matches) >= limit:
+                        return matches, False, next_byte, next_line, bytes_read
+                    search_at = index + 1
+                if end:
+                    return matches, True, handle.tell(), buffer_line, bytes_read
+                dropped = buffer[:safe_end]
+                buffer = buffer[safe_end:]
+                buffer_byte += len(dropped.encode("utf-8"))
+                buffer_line += dropped.count("\n")
+
+    def _read_member(self, request: dict[str, object]) -> dict[str, object]:
+        target_id = str(request["target_id"])
+        target = self.target_by_id.get(target_id)
+        start_line = int(request["start_line"])
+        max_lines = int(request["max_lines"])
+        if target is None:
+            return self._empty_read_response(
+                target_id,
+                start_line,
+                "target_not_found",
+                "The requested browser target does not exist.",
+            )
+        path, reason = self.ensure_text(target)
+        if path is None:
+            code = (
+                "decode_error"
+                if reason == "decode_error"
+                else "member_read_error"
+                if reason in {"member_read_error", "integrity_error"}
+                else "target_not_readable"
+            )
+            return self._empty_read_response(
+                target_id,
+                start_line,
+                code,
+                "The requested browser target is not readable as supported text.",
+            )
+        (
+            text,
+            end_line,
+            next_line,
+            end_of_text,
+            text_truncated,
+            returned_bytes,
+        ) = self._read_path_lines(path, start_line, max_lines)
+        response = self._common_response("read_member", "complete")
+        response.update(
+            {
+                "start_line": start_line,
+                "end_line": end_line,
+                "text": text,
+                "next_line": next_line,
+                "end_of_text": end_of_text,
+                "text_truncated": text_truncated,
+                "returned_bytes": returned_bytes,
+            }
+        )
+        return response
+
+    def _empty_read_response(
+        self,
+        target_id: str,
+        start_line: int,
+        code: str,
+        message: str,
+    ) -> dict[str, object]:
+        response = self._common_response(
+            "read_member",
+            "error",
+            [self._browser_issue(code, target_id, message)],
+        )
+        response.update(
+            {
+                "start_line": start_line,
+                "end_line": None,
+                "text": "",
+                "next_line": None,
+                "end_of_text": False,
+                "text_truncated": False,
+                "returned_bytes": 0,
+            }
+        )
+        return response
+
+    def _read_path_lines(
+        self, path: Path, start_line: int, max_lines: int
+    ) -> tuple[str, int | None, int | None, bool, bool, int]:
+        byte_limit = 64 * 1024
+        line_number = 1
+        output: list[str] = []
+        returned = 0
+        truncated = False
+        eof = False
+        with path.open("rb") as handle:
+            while line_number < start_line:
+                chunk = handle.readline(64 * 1024)
+                if not chunk:
+                    eof = True
+                    break
+                if chunk.endswith(b"\n"):
+                    line_number += 1
+            if eof:
+                return "", None, None, True, False, 0
+            while len(output) < max_lines and returned < byte_limit:
+                remaining = byte_limit - returned
+                raw = handle.readline(remaining + 1)
+                if not raw:
+                    eof = True
+                    break
+                overlong = len(raw) > remaining
+                kept = raw[:remaining] if overlong else raw
+                decoded = ""
+                while kept:
+                    try:
+                        decoded = kept.decode("utf-8")
+                    except UnicodeDecodeError as error:
+                        if error.reason != "unexpected end of data":
+                            raise
+                        kept = kept[:-1]
+                    else:
+                        break
+                content = decoded.rstrip("\n").removesuffix("\r")
+                output.append(f"{line_number}: {_display_text(content)}")
+                returned += len(kept)
+                if overlong or (not raw.endswith(b"\n") and returned >= byte_limit):
+                    truncated = True
+                    while raw and not raw.endswith(b"\n"):
+                        raw = handle.readline(64 * 1024)
+                    line_number += 1
+                    break
+                line_number += 1
+            if not truncated:
+                position = handle.tell()
+                eof = not handle.read(1)
+                handle.seek(position)
+        end_line = start_line + len(output) - 1 if output else None
+        next_line = None if eof else line_number
+        return "\n".join(output), end_line, next_line, eof, truncated, returned

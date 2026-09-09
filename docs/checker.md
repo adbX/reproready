@@ -11,7 +11,10 @@ The report contract and initial rule semantics are frozen before implementation:
 
 `reproready check` and `check_path()` are not available yet. The current package continues to provide `reproready score` and `score_path()` unchanged.
 
-The bounded browser is an implementation contract for development rule-discovery work, not a public command or model-assisted checker mode. It can expose only escaped, bounded data from the completed checker snapshot through stable member identities.
+The bounded browser is an implemented internal development interface, not a public command or
+model-assisted checker mode. It exposes only escaped, bounded data from the completed checker
+snapshot through stable member identities and the versioned list, literal-search, and line-read
+operations.
 
 ## Intended interface
 
@@ -31,6 +34,14 @@ report = check_path("artifact.zip")
 ```
 
 The implemented intake boundary holds a descriptor to the input, copies it into checker-owned temporary storage without following a top-level link, verifies that its identity, size, and modification state remain stable, and gives only the completed snapshot to one killable inspection child. The parent monitors the child against the fixed resident-memory and elapsed-time ceilings. If the source changes, the parent produces a valid small report with `snapshot_complete: false`, detected kind `unclassified`, a null SHA-256, `source_changed` issues, and error rule results. That represented input failure exits 0.
+
+The internal intake now classifies and parses the supported direct forms, walks ZIP and ZIP64
+containers plus nested ZIPs through the fixed depth, and records every visited member in physical
+preorder. Duplicate names retain separate ordinals and member IDs, so each occurrence remains
+addressable. Member bytes are copied only into checker-owned bounded cache files; the implementation
+does not extract an archive directory tree. Unsupported compression, encryption, links, special
+entries, unsafe names, integrity failures, parser errors, and reached limits remain explicit in the
+report.
 
 ## Supported inputs
 

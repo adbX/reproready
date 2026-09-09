@@ -11,6 +11,10 @@ readiness, not executability.
 src/reproready/        # the package
   inventory.py         # archive/dir walker → RawEntry list (the public reader)
   checker_intake.py     # descriptor-held snapshot + bounded inspection child
+  checker.py            # internal snapshot-to-report orchestration
+  checker_report.py     # deterministic report construction and encoding
+  checker_inventory.py  # bounded direct-file and nested-ZIP inspection
+  checker_browser.py    # internal versioned member-browser session
   routing.py           # basename → (stage, channel) routing table
   scope.py             # which stages are in scope for this artifact
   content.py           # targeted member-byte reads
