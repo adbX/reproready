@@ -84,8 +84,14 @@ def _set_compression(data: bytes, method: int) -> bytes:
     return _patch_u16(data, b"PK\x01\x02", 10, method)
 
 
-def _corrupt_crc(data: bytes) -> bytes:
-    central = data.find(b"PK\x01\x02")
+def _corrupt_crc(data: bytes, occurrence: int = 0) -> bytes:
+    central = -1
+    start = 0
+    for _ in range(occurrence + 1):
+        central = data.find(b"PK\x01\x02", start)
+        if central < 0:
+            raise ValueError("missing ZIP central-directory entry")
+        start = central + 4
     current = struct.unpack_from("<I", data, central + 16)[0]
     patched = bytearray(data)
     struct.pack_into("<I", patched, central + 16, current ^ 0xFFFFFFFF)
@@ -207,6 +213,7 @@ def build_checker_inputs(root: Path) -> CheckerInputSet:
         ),
         ("link.py", b"project/main.py", stat.S_IFLNK | 0o777),
         ("pipe", b"", stat.S_IFIFO | 0o644),
+        ("explicit-directory/", b"", stat.S_IFIFO | 0o644),
         ("environment.yml", b"dependencies:\n  - python\n"),
         ("one.zip", nested),
     ]
@@ -223,6 +230,18 @@ def build_checker_inputs(root: Path) -> CheckerInputSet:
             _set_compression(basic, 99),
         ),
         "crc_corrupt_zip": ("crc-corrupt.zip", _corrupt_crc(basic)),
+        "opaque_corrupt_zip": (
+            "opaque-corrupt.zip",
+            _corrupt_crc(
+                _zip_bytes(
+                    [
+                        ("main.py", b"value = 1\n"),
+                        ("payload.bin", b"opaque payload\n"),
+                    ]
+                ),
+                occurrence=1,
+            ),
+        ),
         "central_directory_error_zip": (
             "central-directory-error.zip",
             _corrupt_central_directory(basic),

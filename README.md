@@ -58,11 +58,12 @@ Use `uv sync --extra llm` when developing the optional model integration.
 
 ## Checker under development
 
-The separate read-only checker is being specified before implementation. Its
+The separate read-only checker is being implemented against its frozen
 [`reproready check` guide](docs/checker.md),
 [`python-v1` ruleset](docs/checker-ruleset-v1.md), and
-[versioned JSON Schema](src/reproready/schemas/check-report-v1.schema.json) are
-available for review. The command and `check_path()` API are not available yet;
+[versioned JSON Schema](src/reproready/schemas/check-report-v1.schema.json).
+Bounded intake, member browsing, and the `archive.structure` rule now exist as
+internal interfaces. The command and `check_path()` API are not available yet;
 the existing score command and API remain unchanged.
 
 ## License

@@ -2,7 +2,7 @@
 
 The ReproReady checker is a read-only static inspection command under development. It will read one regular file without running artifact code and report exact observations, inspection limits, and questions that require a person's judgment. It is separate from the ReproReady score and does not emit `R`, stages, tiers, or grades.
 
-The report contract and initial rule semantics are frozen before implementation:
+The report contract and initial rule semantics are frozen while implementation proceeds:
 
 - [JSON report schema v1](../src/reproready/schemas/check-report-v1.schema.json)
 - [Python ruleset v1](checker-ruleset-v1.md)
@@ -11,10 +11,10 @@ The report contract and initial rule semantics are frozen before implementation:
 
 `reproready check` and `check_path()` are not available yet. The current package continues to provide `reproready score` and `score_path()` unchanged.
 
-The bounded browser is an implemented internal development interface, not a public command or
-model-assisted checker mode. It exposes only escaped, bounded data from the completed checker
-snapshot through stable member identities and the versioned list, literal-search, and line-read
-operations.
+The bounded browser and `archive.structure` result are implemented as internal development interfaces,
+not a public command or model-assisted checker mode. The browser exposes only escaped, bounded data
+from the completed checker snapshot through stable member identities and the versioned list,
+literal-search, and line-read operations.
 
 ## Intended interface
 
@@ -35,13 +35,16 @@ report = check_path("artifact.zip")
 
 The implemented intake boundary holds a descriptor to the input, copies it into checker-owned temporary storage without following a top-level link, verifies that its identity, size, and modification state remain stable, and gives only the completed snapshot to one killable inspection child. The parent monitors the child against the fixed resident-memory and elapsed-time ceilings. If the source changes, the parent produces a valid small report with `snapshot_complete: false`, detected kind `unclassified`, a null SHA-256, `source_changed` issues, and error rule results. That represented input failure exits 0.
 
-The internal intake now classifies and parses the supported direct forms, walks ZIP and ZIP64
-containers plus nested ZIPs through the fixed depth, and records every visited member in physical
-preorder. Duplicate names retain separate ordinals and member IDs, so each occurrence remains
-addressable. Member bytes are copied only into checker-owned bounded cache files; the implementation
-does not extract an archive directory tree. Unsupported compression, encryption, links, special
-entries, unsafe names, integrity failures, parser errors, and reached limits remain explicit in the
-report.
+The internal intake classifies and parses the supported direct forms, walks ZIP and ZIP64 containers
+plus nested ZIPs through the fixed depth, and records every visited member in physical preorder.
+Duplicate names retain separate ordinals and member IDs, so each occurrence remains addressable.
+Every readable regular member receives one bounded full read. Bytes needed for source parsing or
+nested-ZIP inspection are retained in checker-owned cache files, while opaque member bytes stream to
+a discard sink. The implementation does not extract an archive directory tree.
+
+The implemented `archive.structure` result maps exact intake facts to member-linked findings and
+separate coverage blockers. Unsupported compression, encryption, links, special entries, unsafe
+names, integrity and central-directory failures, and reached archive limits remain explicit.
 
 ## Supported inputs
 
@@ -72,7 +75,7 @@ The fixed v1 limits are 2 GiB of input, 100,000 members, three nested ZIP levels
 
 Rule results use `complete`, `partial`, `unsupported`, `error`, or `not_applicable`. Findings are independent of coverage. Only a complete result with no observations may be summarized as `no finding in the checks run`; the checker never labels an artifact as passed.
 
-Artifact-derived terminal text will escape control characters, bidirectional controls, and Rich markup. Color will never carry the only indication of a finding or limitation, and `NO_COLOR` will be honored.
+The internal terminal renderer escapes control and bidirectional characters, treats Rich markup as literal text, labels findings and limitations without relying on color, and honors `NO_COLOR`. The future public command will use the same report-driven presentation rules.
 
 ## Process outcomes
 

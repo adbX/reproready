@@ -39,8 +39,8 @@ def _report_worker(
     cache_root.mkdir(mode=0o700)
     engine = InspectionEngine(snapshot, checkpoint, cache_root)
     checkpoint(f"detected_kind:{engine.detected_kind}")
-    engine.inspect()
-    return engine.report_bytes()
+    report = engine.inspect()
+    return encode_report(report)
 
 
 def _safe_input_identity(source: str | os.PathLike[str]) -> tuple[str, int]:

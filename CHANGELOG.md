@@ -6,6 +6,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Implemented the internal `archive.structure` rule with exact member-linked findings, separate
+  coverage records, deterministic observation IDs, bounded full-member verification, valid report
+  prefixes at observation and report limits, and a terminal-safe Rich renderer. The public checker
+  command and `check_path()` remain unavailable until the remaining rules are implemented.
 - Added internal bounded intake for direct Python, nbformat 4 notebooks, supported dependency files,
   ZIP, ZIP64, and nested ZIPs. Stable container and member identities preserve duplicate access;
   fixed expansion, parser, storage, report, memory, and time limits produce explicit partial or error

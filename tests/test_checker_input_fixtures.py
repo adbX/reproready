@@ -25,6 +25,7 @@ EXPECTED_CASES = {
     "hostile_zip",
     "malformed_notebook",
     "minimal_python",
+    "opaque_corrupt_zip",
     "mutable_source",
     "pyproject",
     "requirements",
@@ -80,6 +81,11 @@ def test_hostile_zip_preserves_structural_cases(
         assert stat.S_ISFIFO(
             next(info for info in infos if info.filename == "pipe").external_attr >> 16
         )
+        directory = next(
+            info for info in infos if info.filename == "explicit-directory/"
+        )
+        assert directory.is_dir()
+        assert stat.S_ISFIFO(directory.external_attr >> 16)
 
 
 def test_nested_zip_reaches_one_level_beyond_contract(
@@ -112,6 +118,10 @@ def test_zip_variants_expose_expected_reader_failures(
     with zipfile.ZipFile(checker_inputs.paths["crc_corrupt_zip"]) as archive:
         with pytest.raises(zipfile.BadZipFile):
             archive.read(archive.infolist()[0])
+    with zipfile.ZipFile(checker_inputs.paths["opaque_corrupt_zip"]) as archive:
+        assert archive.read(archive.infolist()[0]) == b"value = 1\n"
+        with pytest.raises(zipfile.BadZipFile):
+            archive.read(archive.infolist()[1])
 
     central_error = checker_inputs.paths["central_directory_error_zip"]
     assert zipfile.is_zipfile(central_error)

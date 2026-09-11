@@ -20,15 +20,25 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only on Python 3.10.
     import tomli as tomllib
 
 from .checker_intake import FIXED_LIMITS, SourceSnapshot, WorkerCheckpoint
-from .checker_report import classify_snapshot, encode_report, successful_intake_report
+from .checker_report import (
+    _BoundedRecords,
+    classify_snapshot,
+    encode_report,
+    successful_intake_report,
+)
 
 _READ_CHUNK_BYTES = 1024 * 1024
-_REPORT_RESERVE_BYTES = 64 * 1024
 _SOURCE_FORMS = {
     "direct_python": "python_file",
     "direct_notebook": "notebook_document",
     "direct_requirements": "requirements",
     "direct_pyproject": "pyproject",
+}
+_SOURCE_LIMITS = {
+    "python_file": "max_python_source_bytes",
+    "notebook_document": "max_notebook_bytes",
+    "requirements": "max_dependency_file_bytes",
+    "pyproject": "max_dependency_file_bytes",
 }
 _UNREADABLE_SUFFIXES = (
     ".zip",
@@ -204,6 +214,13 @@ def _issue(code: str, message: str, member_id: str | None) -> dict[str, object]:
     return {"code": code, "message": message, "member_id": member_id}
 
 
+def _remove_cache_file(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _source_record(
     source_id: str,
     member_id: str | None,
@@ -266,6 +283,8 @@ class InspectionEngine:
         self.detected_kind = classify_snapshot(snapshot.display_name, snapshot.path)
         self.parsers: set[str] = set()
         self.reached_limits: list[str] = []
+        self.records = _BoundedRecords()
+        self._limit_members: dict[str, str | None] = {}
         self.inventory_issues: list[dict[str, object]] = []
         self.members: list[dict[str, object]] = []
         self.sources: list[dict[str, object]] = []
@@ -279,6 +298,52 @@ class InspectionEngine:
         self._cursor_number = 0
         self._cursors: dict[str, tuple[Any, ...]] = {}
 
+    def _record_limit_stop(self) -> None:
+        if self.records.limit_name != "max_report_bytes":
+            return
+        if "max_report_bytes" not in self.reached_limits:
+            self.reached_limits.append("max_report_bytes")
+        self.inventory_status = "partial"
+        self._stop_inventory = True
+
+    def _append_inventory_issue(self, issue: dict[str, object]) -> bool:
+        accepted = self.records.append(
+            self.inventory_issues,
+            issue,
+            member_id=issue["member_id"],
+        )
+        if not accepted:
+            self._record_limit_stop()
+        return accepted
+
+    def _append_member(self, member: dict[str, object]) -> bool:
+        accepted = self.records.append(self.members, member)
+        if not accepted:
+            self._record_limit_stop()
+        return accepted
+
+    def _append_source(self, source: dict[str, object]) -> bool:
+        accepted = self.records.append(
+            self.sources,
+            source,
+            member_id=source["member_id"],
+        )
+        if not accepted:
+            self._record_limit_stop()
+        return accepted
+
+    def _append_reached_issues(self) -> None:
+        member_ids = {str(member["member_id"]) for member in self.members}
+        for limit in tuple(self.reached_limits):
+            if limit not in _LIMIT_ISSUES:
+                continue
+            code, message = _LIMIT_ISSUES[limit]
+            member_id = self._limit_members.get(limit)
+            if member_id not in member_ids:
+                member_id = None
+            if not self._append_inventory_issue(_issue(code, message, member_id)):
+                return
+
     def inspect(self) -> dict[str, object]:
         """Build bounded direct or ZIP intake and return its report object."""
 
@@ -291,7 +356,7 @@ class InspectionEngine:
         else:
             self.inventory_status = "unsupported"
             syntax = self.detected_kind.removeprefix("unsupported_").replace("_", " ")
-            self.inventory_issues.append(
+            self._append_inventory_issue(
                 _issue(
                     "unsupported_format",
                     f"The regular file has {syntax} syntax, which is unsupported in v1.",
@@ -313,6 +378,7 @@ class InspectionEngine:
                     cache_path=self.snapshot.path,
                 )
             )
+        self._append_reached_issues()
         report = successful_intake_report(
             self.snapshot,
             detected_kind=self.detected_kind,
@@ -322,6 +388,7 @@ class InspectionEngine:
             members=self.members,
             issues=self.inventory_issues,
             source_index=self.sources,
+            records=self.records,
         )
         if len(encode_report(report)) > FIXED_LIMITS["max_report_bytes"]:
             raise InventoryError(
@@ -356,21 +423,20 @@ class InspectionEngine:
         try:
             self._walk_container(outer)
         except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile):
-            self.inventory_issues.append(
+            self._append_inventory_issue(
                 _issue(
                     "central_directory_error",
                     "The ZIP central directory could not be read completely.",
                     outer.parent_member_id,
                 )
             )
-            self.inventory_status = "partial" if self.members else "error"
+            self.inventory_status = "partial"
         if self.reached_limits and self.inventory_status == "complete":
             self.inventory_status = "partial"
 
     def _walk_container(self, container: _Container) -> None:
         with zipfile.ZipFile(container.path) as archive:
             infos = archive.infolist()
-            duplicate_counts = Counter(info.filename for info in infos)
             duplicate_ordinals: Counter[str] = Counter()
             for info in infos:
                 if self._stop_inventory:
@@ -380,17 +446,17 @@ class InspectionEngine:
                     self._stop_inventory = True
                     return
                 duplicate_ordinals[info.filename] += 1
+                duplicate_ordinal = duplicate_ordinals[info.filename]
                 member_id = f"member:{len(self.members)}"
-                issues: list[dict[str, object]] = []
-                issues.extend(
+                issues = [
                     _issue(code, message, member_id)
                     for code, message in _path_issues(info.filename)
-                )
-                if duplicate_counts[info.filename] > 1:
+                ]
+                if duplicate_ordinal > 1:
                     issues.append(
                         _issue(
                             "duplicate_member_name",
-                            "The decoded member name occurs more than once in this container.",
+                            "The decoded member name repeats an earlier entry in this container.",
                             member_id,
                         )
                     )
@@ -424,7 +490,7 @@ class InspectionEngine:
                     "member_id": member_id,
                     "parent_member_id": container.parent_member_id,
                     "name": info.filename,
-                    "duplicate_ordinal": duplicate_ordinals[info.filename],
+                    "duplicate_ordinal": duplicate_ordinal,
                     "kind": kind,
                     "compressed_size": info.compress_size,
                     "expanded_size": info.file_size,
@@ -442,7 +508,7 @@ class InspectionEngine:
                     container.container_id,
                     container.parent_member_id,
                     info.filename,
-                    duplicate_ordinals[info.filename],
+                    duplicate_ordinal,
                     kind,
                     info.compress_size,
                     info.file_size,
@@ -450,68 +516,38 @@ class InspectionEngine:
                     container=container,
                     zip_info=info,
                 )
-                self.members.append(member)
-                self._add_target(target)
-                if not self._compression_supported(target):
-                    continue
                 folded = _member_basename(info.filename).casefold()
-                if kind == "file" and folded.endswith(".zip"):
-                    self._inspect_nested_zip(target, container.depth)
                 form = _member_source_form(info.filename)
+                nested_candidate = kind == "file" and folded.endswith(".zip")
+                if nested_candidate and (
+                    container.depth >= FIXED_LIMITS["max_nested_zip_depth"]
+                ):
+                    member["read_status"] = "unsupported"
+                    member["issues"].append(
+                        _issue(
+                            "nested_zip_depth_limit",
+                            "The nested ZIP was inventoried but not opened beyond depth 3.",
+                            member_id,
+                        )
+                    )
+                    self._reach("max_nested_zip_depth", member_id)
+                elif kind == "file" and not info.flag_bits & 1:
+                    retain = nested_candidate or (
+                        form is not None
+                        and info.file_size <= FIXED_LIMITS[_SOURCE_LIMITS[form]]
+                    )
+                    self._read_target(target, archive=archive, retain=retain)
+                if not self._append_member(member):
+                    return
+                self._add_target(target)
+                if nested_candidate and target.cache_path is not None:
+                    self._open_nested_zip(target, container.depth)
                 if form is not None and target.kind == "file":
                     self._inspect_source(target, form, direct=False)
 
-    def _compression_supported(self, target: _Target) -> bool:
-        if target.kind != "file" or target.member is None:
-            return False
-        if any(issue["code"] == "encrypted_entry" for issue in target.member["issues"]):
-            return False
-        assert target.container is not None and target.zip_info is not None
-        try:
-            with (
-                zipfile.ZipFile(target.container.path) as archive,
-                archive.open(target.zip_info),
-            ):
-                pass
-        except NotImplementedError:
-            target.member["read_status"] = "unsupported"
-            target.member["issues"].append(
-                _issue(
-                    "unsupported_compression",
-                    "The archive entry uses an unsupported compression method.",
-                    target.member_id,
-                )
-            )
-            return False
-        except (OSError, RuntimeError, zipfile.BadZipFile):
-            target.member["read_status"] = "error"
-            target.member["integrity_status"] = "error"
-            target.member["issues"].append(
-                _issue(
-                    "member_read_error",
-                    "The archive entry could not be opened safely.",
-                    target.member_id,
-                )
-            )
-            return False
-        return True
-
-    def _inspect_nested_zip(self, target: _Target, parent_depth: int) -> None:
-        if parent_depth >= FIXED_LIMITS["max_nested_zip_depth"]:
-            assert target.member is not None
-            target.member["read_status"] = "unsupported"
-            target.member["issues"].append(
-                _issue(
-                    "nested_zip_depth_limit",
-                    "The nested ZIP was inventoried but not opened beyond depth 3.",
-                    target.member_id,
-                )
-            )
-            self._reach("max_nested_zip_depth", target.member_id)
-            return
-        cache = self._cache_target(target)
-        if cache is None:
-            return
+    def _open_nested_zip(self, target: _Target, parent_depth: int) -> None:
+        cache = target.cache_path
+        assert cache is not None
         if not zipfile.is_zipfile(cache):
             return
         assert target.member is not None
@@ -527,14 +563,7 @@ class InspectionEngine:
         try:
             self._walk_container(container)
         except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile):
-            target.member["issues"].append(
-                _issue(
-                    "central_directory_error",
-                    "The nested ZIP central directory could not be read completely.",
-                    target.member_id,
-                )
-            )
-            self.inventory_issues.append(
+            self._append_inventory_issue(
                 _issue(
                     "central_directory_error",
                     "A nested ZIP central directory could not be read completely.",
@@ -546,6 +575,15 @@ class InspectionEngine:
     def _cache_target(self, target: _Target) -> Path | None:
         if target.cache_path is not None:
             return target.cache_path
+        return self._read_target(target, retain=True)
+
+    def _read_target(
+        self,
+        target: _Target,
+        *,
+        archive: zipfile.ZipFile | None = None,
+        retain: bool,
+    ) -> Path | None:
         assert target.member is not None
         assert target.container is not None and target.zip_info is not None
         expected = target.expanded_size
@@ -559,48 +597,96 @@ class InspectionEngine:
             ):
                 self._member_limit(target, "max_expanded_bytes_total")
                 return None
-            if self.temporary_bytes + expected > FIXED_LIMITS["max_temporary_bytes"]:
+            if (
+                retain
+                and self.temporary_bytes + expected
+                > FIXED_LIMITS["max_temporary_bytes"]
+            ):
                 self._member_limit(target, "max_temporary_bytes")
                 return None
-        destination = self.cache_root / f"member-{target.member_id.split(':')[1]}.data"
-        partial = destination.with_suffix(".partial")
+
+        destination = (
+            self.cache_root / f"member-{target.member_id.split(':')[1]}.data"
+            if retain
+            else None
+        )
+        partial = (
+            destination.with_suffix(".partial") if destination is not None else None
+        )
+        output = None
         written = 0
-        try:
-            descriptor = os.open(
-                partial,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
-                stat.S_IRUSR | stat.S_IWUSR,
-            )
-            with (
-                os.fdopen(descriptor, "wb") as output,
-                zipfile.ZipFile(target.container.path) as archive,
-                archive.open(target.zip_info) as source,
-            ):
+        cache_error = False
+
+        if partial is not None:
+            descriptor: int | None = None
+            try:
+                descriptor = os.open(
+                    partial,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
+                    stat.S_IRUSR | stat.S_IWUSR,
+                )
+                output = os.fdopen(descriptor, "wb")
+                descriptor = None
+            except OSError:
+                cache_error = True
+                if descriptor is not None:
+                    try:
+                        os.close(descriptor)
+                    except OSError:
+                        pass
+
+        def read_from(active_archive: zipfile.ZipFile) -> bool:
+            nonlocal cache_error, output, written
+            with active_archive.open(target.zip_info) as source:
+                member_bytes = 0
                 while chunk := source.read(_READ_CHUNK_BYTES):
                     if (
-                        written + len(chunk)
+                        member_bytes + len(chunk)
                         > FIXED_LIMITS["max_expanded_bytes_per_member"]
                     ):
                         self._member_limit(target, "max_expanded_bytes_per_member")
-                        return None
+                        return False
                     if (
                         self.expanded_bytes + len(chunk)
                         > FIXED_LIMITS["max_expanded_bytes_total"]
                     ):
                         self._member_limit(target, "max_expanded_bytes_total")
-                        return None
+                        return False
+                    member_bytes += len(chunk)
+                    self.expanded_bytes += len(chunk)
+                    if output is None:
+                        continue
                     if (
                         self.temporary_bytes + len(chunk)
                         > FIXED_LIMITS["max_temporary_bytes"]
                     ):
                         self._member_limit(target, "max_temporary_bytes")
-                        return None
-                    output.write(chunk)
-                    written += len(chunk)
-                    self.expanded_bytes += len(chunk)
-                    self.temporary_bytes += len(chunk)
-            os.replace(partial, destination)
-            destination.chmod(stat.S_IRUSR)
+                        return False
+                    try:
+                        output.write(chunk)
+                    except OSError:
+                        cache_error = True
+                        self.temporary_bytes -= written
+                        written = 0
+                        try:
+                            output.close()
+                        except OSError:
+                            pass
+                        output = None
+                        if partial is not None:
+                            _remove_cache_file(partial)
+                    else:
+                        written += len(chunk)
+                        self.temporary_bytes += len(chunk)
+            return True
+
+        complete = False
+        try:
+            if archive is None:
+                with zipfile.ZipFile(target.container.path) as reopened:
+                    complete = read_from(reopened)
+            else:
+                complete = read_from(archive)
         except NotImplementedError:
             target.member["read_status"] = "unsupported"
             target.member["issues"].append(
@@ -610,8 +696,7 @@ class InspectionEngine:
                     target.member_id,
                 )
             )
-            return None
-        except (OSError, RuntimeError, zipfile.BadZipFile, EOFError):
+        except (RuntimeError, zipfile.BadZipFile, EOFError):
             target.member["read_status"] = "error"
             target.member["integrity_status"] = "error"
             target.member["issues"].append(
@@ -621,12 +706,59 @@ class InspectionEngine:
                     target.member_id,
                 )
             )
-            return None
+        except OSError:
+            target.member["read_status"] = "error"
+            target.member["issues"].append(
+                _issue(
+                    "member_read_error",
+                    "The archive entry could not be read because of a checker I/O failure.",
+                    target.member_id,
+                )
+            )
         finally:
-            partial.unlink(missing_ok=True)
-        target.cache_path = destination
+            if output is not None:
+                try:
+                    output.close()
+                except OSError:
+                    cache_error = True
+                output = None
+            if not complete or cache_error:
+                self.temporary_bytes -= written
+                written = 0
+                if partial is not None:
+                    _remove_cache_file(partial)
+
+        if not complete:
+            return None
         target.member["read_status"] = "complete"
         target.member["integrity_status"] = "ok"
+        if destination is None:
+            return None
+        if cache_error or partial is None:
+            target.member["issues"].append(
+                _issue(
+                    "checker_cache_error",
+                    "The verified archive entry could not be retained in checker storage.",
+                    target.member_id,
+                )
+            )
+            return None
+        try:
+            os.replace(partial, destination)
+            destination.chmod(stat.S_IRUSR)
+        except OSError:
+            self.temporary_bytes -= written
+            _remove_cache_file(partial)
+            _remove_cache_file(destination)
+            target.member["issues"].append(
+                _issue(
+                    "checker_cache_error",
+                    "The verified archive entry could not be retained in checker storage.",
+                    target.member_id,
+                )
+            )
+            return None
+        target.cache_path = destination
         return destination
 
     def _member_limit(self, target: _Target, limit: str) -> None:
@@ -639,22 +771,16 @@ class InspectionEngine:
     def _reach(self, limit: str, member_id: str | None) -> None:
         if limit not in self.reached_limits:
             self.reached_limits.append(limit)
-            code, message = _LIMIT_ISSUES[limit]
-            self.inventory_issues.append(_issue(code, message, member_id))
+            self._limit_members[limit] = member_id
         self.inventory_status = "partial"
 
     def _inspect_source(self, target: _Target, form: str, *, direct: bool) -> None:
-        limit_name = {
-            "python_file": "max_python_source_bytes",
-            "notebook_document": "max_notebook_bytes",
-            "requirements": "max_dependency_file_bytes",
-            "pyproject": "max_dependency_file_bytes",
-        }[form]
+        limit_name = _SOURCE_LIMITS[form]
         size = target.expanded_size
         source_id = f"source:{len(self.sources)}"
         language = "python" if form == "python_file" else None
         if size is not None and size > FIXED_LIMITS[limit_name]:
-            self.sources.append(
+            self._append_source(
                 _source_record(
                     source_id,
                     target.member_id,
@@ -666,10 +792,10 @@ class InspectionEngine:
             )
             self._reach(limit_name, target.member_id)
             return
-        path = target.cache_path if direct else self._cache_target(target)
+        path = target.cache_path if not direct else self.snapshot.path
         if path is None:
             reason = self._target_reason(target)
-            self.sources.append(
+            self._append_source(
                 _source_record(
                     source_id,
                     target.member_id,
@@ -684,7 +810,7 @@ class InspectionEngine:
             body = path.read_bytes()
             text = body.decode("utf-8")
         except UnicodeDecodeError:
-            self.sources.append(
+            self._append_source(
                 _source_record(
                     source_id,
                     target.member_id,
@@ -697,7 +823,7 @@ class InspectionEngine:
             target.text_valid = False
             return
         except OSError:
-            self.sources.append(
+            self._append_source(
                 _source_record(
                     source_id,
                     target.member_id,
@@ -714,7 +840,7 @@ class InspectionEngine:
             try:
                 ast.parse(text)
             except SyntaxError:
-                self.sources.append(
+                self._append_source(
                     _source_record(
                         source_id,
                         target.member_id,
@@ -725,7 +851,7 @@ class InspectionEngine:
                     )
                 )
             else:
-                self.sources.append(
+                self._append_source(
                     _source_record(
                         source_id,
                         target.member_id,
@@ -747,7 +873,7 @@ class InspectionEngine:
                 if any(not isinstance(item, str) for item in dependencies):
                     raise TypeError
             except (tomllib.TOMLDecodeError, TypeError, AttributeError):
-                self.sources.append(
+                self._append_source(
                     _source_record(
                         source_id,
                         target.member_id,
@@ -757,11 +883,11 @@ class InspectionEngine:
                     )
                 )
             else:
-                self.sources.append(
+                self._append_source(
                     _source_record(source_id, target.member_id, form, "inspected")
                 )
         else:
-            self.sources.append(
+            self._append_source(
                 _source_record(source_id, target.member_id, form, "inspected")
             )
 
@@ -776,7 +902,7 @@ class InspectionEngine:
             if not isinstance(cells, list):
                 raise TypeError
         except (json.JSONDecodeError, TypeError):
-            self.sources.append(
+            self._append_source(
                 _source_record(
                     document_id,
                     target.member_id,
@@ -800,7 +926,7 @@ class InspectionEngine:
             ):
                 languages.add(language_info["name"].casefold())
         if languages != {"python"}:
-            self.sources.append(
+            self._append_source(
                 _source_record(
                     document_id,
                     target.member_id,
@@ -811,7 +937,7 @@ class InspectionEngine:
                 )
             )
             return
-        self.sources.append(
+        self._append_source(
             _source_record(
                 document_id,
                 target.member_id,
@@ -820,7 +946,11 @@ class InspectionEngine:
                 language="python",
             )
         )
+        if self._stop_inventory:
+            return
         for cell_number, cell in enumerate(cells, start=1):
+            if self._stop_inventory:
+                return
             if not isinstance(cell, dict) or cell.get("cell_type") != "code":
                 continue
             source_id = f"source:{len(self.sources)}"
@@ -830,7 +960,7 @@ class InspectionEngine:
             ):
                 source = "".join(source)
             if not isinstance(source, str):
-                self.sources.append(
+                self._append_source(
                     _source_record(
                         source_id,
                         target.member_id,
@@ -843,7 +973,7 @@ class InspectionEngine:
                 )
                 continue
             if len(source.encode("utf-8")) > FIXED_LIMITS["max_python_source_bytes"]:
-                self.sources.append(
+                self._append_source(
                     _source_record(
                         source_id,
                         target.member_id,
@@ -859,7 +989,7 @@ class InspectionEngine:
             if any(
                 line.lstrip().startswith(("%", "!")) for line in source.splitlines()
             ):
-                self.sources.append(
+                self._append_source(
                     _source_record(
                         source_id,
                         target.member_id,
@@ -877,7 +1007,7 @@ class InspectionEngine:
                 status, reason = "error", "syntax_error"
             else:
                 status, reason = "inspected", None
-            self.sources.append(
+            self._append_source(
                 _source_record(
                     source_id,
                     target.member_id,
@@ -900,22 +1030,6 @@ class InspectionEngine:
     def _add_target(self, target: _Target) -> None:
         self.targets.append(target)
         self.target_by_id[target.target_id] = target
-
-    def report_bytes(self) -> bytes:
-        """Return the current schema-shaped intake report."""
-
-        return encode_report(
-            successful_intake_report(
-                self.snapshot,
-                detected_kind=self.detected_kind,
-                parsers=self.parsers,
-                reached_limits=self.reached_limits,
-                inventory_status=self.inventory_status,
-                members=self.members,
-                issues=self.inventory_issues,
-                source_index=self.sources,
-            )
-        )
 
     def target_listing(self, target: _Target) -> dict[str, object]:
         """Return bounded display metadata for one browser target."""
@@ -962,6 +1076,8 @@ class InspectionEngine:
             return "encrypted"
         if "unsupported_compression" in codes:
             return "unsupported_compression"
+        if "integrity_error" in codes or "member_read_error" in codes:
+            return "member_read_error"
         if _member_basename(target.name).casefold().endswith(_UNREADABLE_SUFFIXES):
             return "unsupported_format"
         return None

@@ -282,6 +282,7 @@ def test_source_mutation_becomes_schema_valid_incomplete_snapshot_report(
             "unsupported_compression",
         ),
         ("crc_corrupt_zip", "complete", "error", "integrity_error"),
+        ("opaque_corrupt_zip", "complete", "complete", None),
     ],
 )
 def test_zip_variants_have_explicit_bounded_member_states(
@@ -314,7 +315,7 @@ def test_central_directory_failure_is_archive_level_and_schema_valid(
 
     report_validator.validate(report)
     assert report["inventory"] == {
-        "status": "error",
+        "status": "partial",
         "members": [],
         "issues": [
             {
