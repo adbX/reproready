@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import ast
 import codecs
-import json
 import os
 import re
 import stat
@@ -20,6 +18,14 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only on Python 3.10.
     import tomli as tomllib
 
 from .checker_intake import FIXED_LIMITS, SourceSnapshot, WorkerCheckpoint
+from .checker_python import (
+    NotebookCellSourceError,
+    NotebookParseError,
+    has_unsupported_notebook_syntax,
+    notebook_cell_source,
+    parse_notebook_document,
+    parse_python_source,
+)
 from .checker_report import (
     _BoundedRecords,
     classify_snapshot,
@@ -95,6 +101,18 @@ _LIMIT_ISSUES = {
         "The fixed encoded-report limit prevented complete inventory.",
     ),
 }
+_SOURCE_READ_BLOCKERS = (
+    ("symlink_entry", "skipped"),
+    ("special_entry", "skipped"),
+    ("encrypted_entry", "skipped"),
+    ("unsupported_compression", "skipped"),
+    ("expanded_member_limit", "skipped"),
+    ("expanded_total_limit", "skipped"),
+    ("temporary_storage_limit", "skipped"),
+    ("integrity_error", "error"),
+    ("checker_cache_error", "error"),
+    ("member_read_error", "error"),
+)
 
 
 class InventoryError(RuntimeError):
@@ -130,6 +148,12 @@ class _Target:
     zip_info: zipfile.ZipInfo | None = None
     cache_path: Path | None = None
     text_valid: bool | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _SourceDescriptor:
+    target: _Target
+    form: str
 
 
 def _member_basename(name: str) -> str:
@@ -288,6 +312,7 @@ class InspectionEngine:
         self.inventory_issues: list[dict[str, object]] = []
         self.members: list[dict[str, object]] = []
         self.sources: list[dict[str, object]] = []
+        self._source_descriptors: list[_SourceDescriptor] = []
         self.targets: list[_Target] = []
         self.target_by_id: dict[str, _Target] = {}
         self.containers: list[_Container] = []
@@ -350,9 +375,11 @@ class InspectionEngine:
         self.checkpoint("after_source_read")
         if self.detected_kind in _SOURCE_FORMS:
             self._inspect_direct()
+            self._inspect_sources()
         elif self.detected_kind == "zip":
             self.parsers.add("zipfile")
             self._inspect_zip()
+            self._inspect_sources()
         else:
             self.inventory_status = "unsupported"
             syntax = self.detected_kind.removeprefix("unsupported_").replace("_", " ")
@@ -413,7 +440,7 @@ class InspectionEngine:
             cache_path=self.snapshot.path,
         )
         self._add_target(target)
-        self._inspect_source(target, form, direct=True)
+        self._source_descriptors.append(_SourceDescriptor(target, form))
         if self.reached_limits:
             self.inventory_status = "partial"
 
@@ -540,10 +567,10 @@ class InspectionEngine:
                 if not self._append_member(member):
                     return
                 self._add_target(target)
+                if form is not None:
+                    self._source_descriptors.append(_SourceDescriptor(target, form))
                 if nested_candidate and target.cache_path is not None:
                     self._open_nested_zip(target, container.depth)
-                if form is not None and target.kind == "file":
-                    self._inspect_source(target, form, direct=False)
 
     def _open_nested_zip(self, target: _Target, parent_depth: int) -> None:
         cache = target.cache_path
@@ -774,7 +801,17 @@ class InspectionEngine:
             self._limit_members[limit] = member_id
         self.inventory_status = "partial"
 
-    def _inspect_source(self, target: _Target, form: str, *, direct: bool) -> None:
+    def _inspect_sources(self) -> None:
+        descriptors = self._source_descriptors
+        self._source_descriptors = []
+        for descriptor in descriptors:
+            if self.records.limit_name == "max_report_bytes":
+                return
+            self._inspect_source(descriptor)
+
+    def _inspect_source(self, descriptor: _SourceDescriptor) -> None:
+        target = descriptor.target
+        form = descriptor.form
         limit_name = _SOURCE_LIMITS[form]
         size = target.expanded_size
         source_id = f"source:{len(self.sources)}"
@@ -792,23 +829,22 @@ class InspectionEngine:
             )
             self._reach(limit_name, target.member_id)
             return
-        path = target.cache_path if not direct else self.snapshot.path
+        path = target.cache_path
         if path is None:
-            reason = self._target_reason(target)
+            status, reason = self._target_blocker(target)
             self._append_source(
                 _source_record(
                     source_id,
                     target.member_id,
                     form,
-                    "error",
+                    status,
                     language=language,
                     reason_code=reason,
                 )
             )
             return
         try:
-            body = path.read_bytes()
-            text = body.decode("utf-8")
+            text = path.read_bytes().decode("utf-8")
         except UnicodeDecodeError:
             self._append_source(
                 _source_record(
@@ -836,32 +872,9 @@ class InspectionEngine:
             return
         target.text_valid = True
         if form == "python_file":
-            self.parsers.add("ast")
-            try:
-                ast.parse(text)
-            except SyntaxError:
-                self._append_source(
-                    _source_record(
-                        source_id,
-                        target.member_id,
-                        form,
-                        "error",
-                        language="python",
-                        reason_code="syntax_error",
-                    )
-                )
-            else:
-                self._append_source(
-                    _source_record(
-                        source_id,
-                        target.member_id,
-                        form,
-                        "inspected",
-                        language="python",
-                    )
-                )
+            self._inspect_python(target, source_id, None, text)
         elif form == "notebook_document":
-            self._inspect_notebook(target, text)
+            self._inspect_notebook(target, source_id, text)
         elif form == "pyproject":
             self.parsers.add("tomllib")
             try:
@@ -891,17 +904,52 @@ class InspectionEngine:
                 _source_record(source_id, target.member_id, form, "inspected")
             )
 
-    def _inspect_notebook(self, target: _Target, text: str) -> None:
-        self.parsers.update({"ast", "json"})
-        document_id = f"source:{len(self.sources)}"
+    def _inspect_python(
+        self,
+        target: _Target,
+        source_id: str,
+        cell: int | None,
+        source: str,
+    ) -> None:
+        self.parsers.add("ast")
         try:
-            document = json.loads(text)
-            if not isinstance(document, dict) or document.get("nbformat") != 4:
-                raise TypeError
-            cells = document.get("cells")
-            if not isinstance(cells, list):
-                raise TypeError
-        except (json.JSONDecodeError, TypeError):
+            parsed = parse_python_source(source_id, target.member_id, cell, source)
+        except SyntaxError:
+            self._append_source(
+                _source_record(
+                    source_id,
+                    target.member_id,
+                    "python_file" if cell is None else "notebook_code_cell",
+                    "error",
+                    cell=cell,
+                    language="python",
+                    reason_code="syntax_error",
+                )
+            )
+            return
+        if not self._append_source(
+            _source_record(
+                source_id,
+                target.member_id,
+                "python_file" if cell is None else "notebook_code_cell",
+                "inspected",
+                cell=cell,
+                language="python",
+            )
+        ):
+            return
+        del parsed
+
+    def _inspect_notebook(
+        self,
+        target: _Target,
+        document_id: str,
+        text: str,
+    ) -> None:
+        self.parsers.add("json")
+        try:
+            document = parse_notebook_document(text)
+        except NotebookParseError:
             self._append_source(
                 _source_record(
                     document_id,
@@ -909,6 +957,17 @@ class InspectionEngine:
                     "notebook_document",
                     "error",
                     reason_code="notebook_parse_error",
+                )
+            )
+            return
+        if type(document.get("nbformat")) is not int or document["nbformat"] != 4:
+            self._append_source(
+                _source_record(
+                    document_id,
+                    target.member_id,
+                    "notebook_document",
+                    "unsupported",
+                    reason_code="unsupported_notebook_version",
                 )
             )
             return
@@ -926,18 +985,21 @@ class InspectionEngine:
             ):
                 languages.add(language_info["name"].casefold())
         if languages != {"python"}:
+            language = next(iter(languages)) if len(languages) == 1 else None
+            if language is not None and len(language) > 128:
+                language = None
             self._append_source(
                 _source_record(
                     document_id,
                     target.member_id,
                     "notebook_document",
                     "unsupported",
-                    language=next(iter(languages)) if len(languages) == 1 else None,
+                    language=language,
                     reason_code="unsupported_notebook_language",
                 )
             )
             return
-        self._append_source(
+        accepted = self._append_source(
             _source_record(
                 document_id,
                 target.member_id,
@@ -946,20 +1008,20 @@ class InspectionEngine:
                 language="python",
             )
         )
-        if self._stop_inventory:
+        if not accepted:
             return
+        cells = document["cells"]
+        assert isinstance(cells, list)
         for cell_number, cell in enumerate(cells, start=1):
-            if self._stop_inventory:
+            if self.records.limit_name == "max_report_bytes":
                 return
             if not isinstance(cell, dict) or cell.get("cell_type") != "code":
                 continue
             source_id = f"source:{len(self.sources)}"
-            source = cell.get("source")
-            if isinstance(source, list) and all(
-                isinstance(item, str) for item in source
-            ):
-                source = "".join(source)
-            if not isinstance(source, str):
+            try:
+                source = notebook_cell_source(cell)
+                source_bytes = len(source.encode("utf-8"))
+            except (NotebookCellSourceError, UnicodeEncodeError):
                 self._append_source(
                     _source_record(
                         source_id,
@@ -972,7 +1034,7 @@ class InspectionEngine:
                     )
                 )
                 continue
-            if len(source.encode("utf-8")) > FIXED_LIMITS["max_python_source_bytes"]:
+            if source_bytes > FIXED_LIMITS["max_python_source_bytes"]:
                 self._append_source(
                     _source_record(
                         source_id,
@@ -986,9 +1048,7 @@ class InspectionEngine:
                 )
                 self._reach("max_python_source_bytes", target.member_id)
                 continue
-            if any(
-                line.lstrip().startswith(("%", "!")) for line in source.splitlines()
-            ):
+            if has_unsupported_notebook_syntax(source):
                 self._append_source(
                     _source_record(
                         source_id,
@@ -1001,31 +1061,16 @@ class InspectionEngine:
                     )
                 )
                 continue
-            try:
-                ast.parse(source)
-            except SyntaxError:
-                status, reason = "error", "syntax_error"
-            else:
-                status, reason = "inspected", None
-            self._append_source(
-                _source_record(
-                    source_id,
-                    target.member_id,
-                    "notebook_code_cell",
-                    status,
-                    cell=cell_number,
-                    language="python",
-                    reason_code=reason,
-                )
-            )
+            self._inspect_python(target, source_id, cell_number, source)
 
-    def _target_reason(self, target: _Target) -> str:
+    def _target_blocker(self, target: _Target) -> tuple[str, str]:
         if target.member is None:
-            return "member_read_error"
-        issues = target.member["issues"]
-        if issues:
-            return str(issues[-1]["code"])
-        return "member_read_error"
+            return "error", "member_read_error"
+        issue_codes = {str(issue["code"]) for issue in target.member["issues"]}
+        for reason, status in _SOURCE_READ_BLOCKERS:
+            if reason in issue_codes:
+                return status, reason
+        return "error", "member_read_error"
 
     def _add_target(self, target: _Target) -> None:
         self.targets.append(target)

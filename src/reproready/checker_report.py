@@ -255,12 +255,20 @@ def pending_rule_results(
         source
         for source in source_index
         if source["form"] in {"python_file", "notebook_code_cell"}
+        or (
+            source["form"] == "notebook_document"
+            and source["status"] in {"skipped", "error"}
+        )
     ]
     dependency_sources = [
         source
         for source in source_index
         if source["form"]
         in {"python_file", "notebook_code_cell", "requirements", "pyproject"}
+        or (
+            source["form"] == "notebook_document"
+            and source["status"] in {"skipped", "error"}
+        )
     ]
 
     def deferred_result(
@@ -272,20 +280,22 @@ def pending_rule_results(
         for source in sources:
             if source["status"] == "inspected":
                 collection = result["skipped_inputs"]
-                coverage = _coverage_item(
-                    "rule_not_run",
-                    "This supported input has not received the deferred rule.",
-                    member_id=source["member_id"],
-                    source_id=source["source_id"],
-                )
+                reason_code = "rule_not_run"
+                message = "This supported input has not received the deferred rule."
+            elif source["status"] in {"skipped", "unsupported"}:
+                collection = result["skipped_inputs"]
+                reason_code = str(source["reason_code"])
+                message = "This applicable input was skipped during source inspection."
             else:
                 collection = result["failed_inputs"]
-                coverage = _coverage_item(
-                    str(source["reason_code"]),
-                    "This supported input could not be inspected completely.",
-                    member_id=source["member_id"],
-                    source_id=source["source_id"],
-                )
+                reason_code = str(source["reason_code"])
+                message = "This applicable input failed during source inspection."
+            coverage = _coverage_item(
+                reason_code,
+                message,
+                member_id=source["member_id"],
+                source_id=source["source_id"],
+            )
             if not records.append(
                 collection,
                 coverage,

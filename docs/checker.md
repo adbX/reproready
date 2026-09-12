@@ -11,10 +11,10 @@ The report contract and initial rule semantics are frozen while implementation p
 
 `reproready check` and `check_path()` are not available yet. The current package continues to provide `reproready score` and `score_path()` unchanged.
 
-The bounded browser and `archive.structure` result are implemented as internal development interfaces,
-not a public command or model-assisted checker mode. The browser exposes only escaped, bounded data
-from the completed checker snapshot through stable member identities and the versioned list,
-literal-search, and line-read operations.
+The bounded browser, `archive.structure` result, and exact Python source index are implemented as
+internal development interfaces, not as a public command or model-assisted checker mode. The browser
+exposes only escaped, bounded data from the completed checker snapshot through stable member identities
+and the versioned list, literal-search, and line-read operations. Both Python semantic rules remain deferred.
 
 ## Intended interface
 
@@ -35,12 +35,16 @@ report = check_path("artifact.zip")
 
 The implemented intake boundary holds a descriptor to the input, copies it into checker-owned temporary storage without following a top-level link, verifies that its identity, size, and modification state remain stable, and gives only the completed snapshot to one killable inspection child. The parent monitors the child against the fixed resident-memory and elapsed-time ceilings. If the source changes, the parent produces a valid small report with `snapshot_complete: false`, detected kind `unclassified`, a null SHA-256, `source_changed` issues, and error rule results. That represented input failure exits 0.
 
-The internal intake classifies and parses the supported direct forms, walks ZIP and ZIP64 containers
-plus nested ZIPs through the fixed depth, and records every visited member in physical preorder.
-Duplicate names retain separate ordinals and member IDs, so each occurrence remains addressable.
-Every readable regular member receives one bounded full read. Bytes needed for source parsing or
-nested-ZIP inspection are retained in checker-owned cache files, while opaque member bytes stream to
-a discard sink. The implementation does not extract an archive directory tree.
+The internal intake classifies the supported direct forms, walks ZIP and ZIP64 containers plus nested
+ZIPs through the fixed depth, and records every visited member in physical preorder. Duplicate names
+retain separate ordinals and member IDs, so each occurrence remains addressable. After discovery, one
+bounded source pass assigns dense global source IDs and parses each accepted Python file or supported
+nbformat 4 code cell once. Its transient context binds each AST to the source and member IDs, physical
+one-based notebook cell, AST line, and exact source syntax; only the public source record enters JSON.
+Skipped, unsupported, and failed source-like members remain explicit, and parser metadata names only
+parsers that ran. Every readable regular archive member receives one bounded full read. Bytes needed
+for source parsing or nested-ZIP inspection are retained in checker-owned cache files, while opaque
+member bytes stream to a discard sink. The implementation does not extract an archive directory tree.
 
 The implemented `archive.structure` result maps exact intake facts to member-linked findings and
 separate coverage blockers. Unsupported compression, encryption, links, special entries, unsafe

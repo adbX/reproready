@@ -6,6 +6,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Added one internal bounded source pass for direct and archived Python plus supported nbformat 4 code
+  cells. Dense source identities, physical one-based cells, exact AST lines and syntax, distinct
+  notebook outcomes, truthful parser metadata, explicit read blockers, and corrected deferred-rule
+  coverage now share the same transient parsed-source context. The semantic rules, public command, and
+  `check_path()` remain unavailable.
 - Implemented the internal `archive.structure` rule with exact member-linked findings, separate
   coverage records, deterministic observation IDs, bounded full-member verification, valid report
   prefixes at observation and report limits, and a terminal-safe Rich renderer. The public checker

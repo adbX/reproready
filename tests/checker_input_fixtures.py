@@ -107,9 +107,15 @@ def _corrupt_central_directory(data: bytes) -> bytes:
     return bytes(patched)
 
 
-def _notebook(*, language: str = "python") -> bytes:
-    payload = {
-        "cells": [
+def _notebook(
+    *,
+    language: str | None = "python",
+    language_info: str | None = None,
+    nbformat: int = 4,
+    cells: list[dict[str, object]] | None = None,
+) -> bytes:
+    if cells is None:
+        cells = [
             {
                 "cell_type": "code",
                 "execution_count": None,
@@ -124,15 +130,27 @@ def _notebook(*, language: str = "python") -> bytes:
                 "source": ["import requests\n", "open('/srv/input.csv')\n"],
             },
             {
+                "cell_type": "raw",
+                "metadata": {},
+                "source": "open('/ignore/raw-cell')\n",
+            },
+            {
                 "cell_type": "code",
                 "execution_count": None,
                 "metadata": {},
                 "outputs": [],
                 "source": "from . import local\n",
             },
-        ],
-        "metadata": {"kernelspec": {"language": language, "name": language}},
-        "nbformat": 4,
+        ]
+    metadata: dict[str, object] = {}
+    if language is not None:
+        metadata["kernelspec"] = {"language": language, "name": language}
+    if language_info is not None:
+        metadata["language_info"] = {"name": language_info}
+    payload = {
+        "cells": cells,
+        "metadata": metadata,
+        "nbformat": nbformat,
         "nbformat_minor": 5,
     }
     return (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode()
@@ -173,6 +191,90 @@ def build_checker_inputs(root: Path) -> CheckerInputSet:
         "valid_notebook": ("valid.ipynb", _notebook()),
         "unsupported_notebook": ("unsupported.ipynb", _notebook(language="R")),
         "malformed_notebook": ("malformed.ipynb", b'{"nbformat":4,"cells":['),
+        "unsupported_version_notebook": (
+            "unsupported-version.ipynb",
+            _notebook(nbformat=3),
+        ),
+        "absent_language_notebook": (
+            "absent-language.ipynb",
+            _notebook(language=None),
+        ),
+        "conflicting_language_notebook": (
+            "conflicting-language.ipynb",
+            _notebook(language="python", language_info="R"),
+        ),
+        "no_code_notebook": (
+            "no-code.ipynb",
+            _notebook(
+                cells=[
+                    {
+                        "cell_type": "markdown",
+                        "metadata": {},
+                        "source": "# No code\n",
+                    }
+                ]
+            ),
+        ),
+        "cell_source_error_notebook": (
+            "cell-source-error.ipynb",
+            _notebook(
+                cells=[
+                    {
+                        "cell_type": "code",
+                        "metadata": {},
+                        "source": ["value = 1\n", 2],
+                    }
+                ]
+            ),
+        ),
+        "magic_notebook": (
+            "magic.ipynb",
+            _notebook(
+                cells=[
+                    {
+                        "cell_type": "code",
+                        "metadata": {},
+                        "source": "  %matplotlib inline\n",
+                    }
+                ]
+            ),
+        ),
+        "shell_notebook": (
+            "shell.ipynb",
+            _notebook(
+                cells=[
+                    {
+                        "cell_type": "code",
+                        "metadata": {},
+                        "source": "\t!python --version\n",
+                    }
+                ]
+            ),
+        ),
+        "surrogate_notebook": (
+            "surrogate.ipynb",
+            _notebook(
+                cells=[
+                    {
+                        "cell_type": "code",
+                        "metadata": {},
+                        "source": "\ud800",
+                    }
+                ]
+            ),
+        ),
+        "syntax_error_notebook": (
+            "syntax-error.ipynb",
+            _notebook(
+                cells=[
+                    {
+                        "cell_type": "code",
+                        "metadata": {},
+                        "source": "def broken(:\n",
+                    }
+                ]
+            ),
+        ),
         "terminal_text": (
             "terminal.py",
             b"# [bold]unsafe[/bold]\x07" + "\u202e".encode() + b"\nvalue = 1\n",
@@ -248,6 +350,10 @@ def build_checker_inputs(root: Path) -> CheckerInputSet:
         ),
         "zip_named_python": ("zip-payload.py", basic),
         "docx_named_zip": ("document.docx", basic),
+        "special_python_zip": (
+            "special-python.zip",
+            _zip_bytes([("blocked.py", b"", stat.S_IFIFO | 0o644)]),
+        ),
     }
     for key, (name, body) in variants.items():
         path = root / name
