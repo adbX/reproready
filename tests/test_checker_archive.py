@@ -11,6 +11,7 @@ from checker_input_fixtures import mutate_source_same_size
 from jsonschema import Draft202012Validator
 
 from reproready.checker import encode_intake_report, intake_report
+from reproready.checker_archive import archive_structure_result
 from reproready.checker_intake import FIXED_LIMITS, SourceSnapshot
 from reproready.checker_report import (
     _BoundedRecords,
@@ -252,6 +253,13 @@ def test_report_cap_keeps_a_schema_valid_prefix_and_reserved_limit_finding(
         ],
     }
     assert records.append(members, member)
+    archive_result = archive_structure_result(
+        "zip",
+        members,
+        [],
+        [],
+        append_record=records.append,
+    )
 
     sources: list[dict[str, object]] = []
     while True:
@@ -276,6 +284,13 @@ def test_report_cap_keeps_a_schema_valid_prefix_and_reserved_limit_finding(
         members=members,
         issues=[],
         source_index=sources,
+        archive_result=archive_result,
+        absolute_path_observations=[],
+        absolute_path_limit_candidate=None,
+        absolute_path_scan_limited_source={
+            "member_id": "member:0",
+            "source_id": None,
+        },
         records=records,
     )
     encoded = encode_report(report)
@@ -289,7 +304,8 @@ def test_report_cap_keeps_a_schema_valid_prefix_and_reserved_limit_finding(
     assert report["inventory"]["status"] == "partial"
     result = _archive_result(report)
     assert [item["condition_code"] for item in result["observations"]] == [
-        "resource_limit_reached"
+        "absolute_member_path",
+        "resource_limit_reached",
     ]
     assert result["observations"][0]["member_id"] == "member:0"
     assert [item["reason_code"] for item in result["skipped_inputs"]] == [

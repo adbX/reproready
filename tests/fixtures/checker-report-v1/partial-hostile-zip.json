@@ -21,6 +21,10 @@
         "version": "3.13.7"
       },
       {
+        "name": "packaging",
+        "version": "26.3"
+      },
+      {
         "name": "zipfile",
         "version": "3.13.7"
       }
@@ -349,7 +353,14 @@
           ]
         }
       ],
-      "skipped_inputs": [],
+      "skipped_inputs": [
+        {
+          "member_id": "member:5",
+          "source_id": null,
+          "reason_code": "nested_zip_depth_limit",
+          "message": "At least one nested ZIP was inventoried but not opened beyond depth 3."
+        }
+      ],
       "failed_inputs": [
         {
           "member_id": "member:1",

@@ -6,11 +6,24 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Implemented the internal `python.dependencies` rule over each transient parsed Python source,
+  supported notebook code cell, direct requirement declaration, and PEP 621
+  `project.dependencies` array. The rule emits lexical import, declaration, running-runtime
+  standard-library, and obvious local-module evidence; relates exact normalized matches only within
+  virtual project and container boundaries; and asks separately about unmatched imports and
+  declarations. Unsupported forms, parser and read failures, global limits, dense relationships,
+  terminal-safe output, and the `packaging` parser version remain explicit. Retained discovery rules,
+  the public command, and `check_path()` remain unavailable.
+- Implemented the internal `python.absolute-path` rule over each transient parsed Python file and
+  supported notebook code cell. The frozen lexical call positions and five host-independent path
+  classes now produce bounded full-call snippets with exact source, member, cell, and line identity;
+  partial coverage and global limit ownership remain explicit, deterministic, schema-valid, and
+  terminal-safe. Retained discovery rules, the public command, and `check_path()` remain unavailable.
 - Added one internal bounded source pass for direct and archived Python plus supported nbformat 4 code
   cells. Dense source identities, physical one-based cells, exact AST lines and syntax, distinct
-  notebook outcomes, truthful parser metadata, explicit read blockers, and corrected deferred-rule
-  coverage now share the same transient parsed-source context. The semantic rules, public command, and
-  `check_path()` remain unavailable.
+  notebook outcomes, truthful parser metadata, explicit read blockers, and corrected dependent-rule
+  coverage now share the same transient parsed-source context. Retained discovery rules, the public
+  command, and `check_path()` remain unavailable.
 - Implemented the internal `archive.structure` rule with exact member-linked findings, separate
   coverage records, deterministic observation IDs, bounded full-member verification, valid report
   prefixes at observation and report limits, and a terminal-safe Rich renderer. The public checker

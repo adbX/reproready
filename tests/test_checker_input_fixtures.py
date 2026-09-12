@@ -24,6 +24,7 @@ EXPECTED_CASES = {
     "crc_corrupt_zip",
     "conflicting_language_notebook",
     "docx_named_zip",
+    "dependency_zip",
     "encrypted_zip",
     "hostile_zip",
     "malformed_notebook",
@@ -187,6 +188,15 @@ def test_python_notebook_and_dependency_cases_are_explicit(
 
     assert b"-r extra.txt" in checker_inputs.paths["requirements"].read_bytes()
     assert b"optional-dependencies" in checker_inputs.paths["pyproject"].read_bytes()
+    with zipfile.ZipFile(checker_inputs.paths["dependency_zip"]) as archive:
+        assert "wrapper/root-a/requirements.txt" in archive.namelist()
+        assert "wrapper/root-a/nested/pyproject.toml" in archive.namelist()
+        assert "wrapper/setup.py" in archive.namelist()
+        with zipfile.ZipFile(BytesIO(archive.read("wrapper/nested.zip"))) as nested:
+            assert nested.namelist() == [
+                "inner/requirements.txt",
+                "inner/main.py",
+            ]
 
     terminal_text = checker_inputs.paths["terminal_text"].read_text()
     assert "[bold]" in terminal_text

@@ -19,8 +19,9 @@ classifiers = [
 
 # The score modules are standard-library only. `rich` is used solely by the CLI
 # renderer; `anthropic` (the `llm` extra) solely by the optional Validation call.
-# Checker runtime dependencies are added only when implementation requires them.
+# Checker-only dependencies stay outside the score pipeline.
 dependencies = [
+    "packaging>=24.0",
     "rich>=13.0",
     "tomli>=2.0; python_version < '3.11'",
 ]

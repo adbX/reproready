@@ -62,9 +62,13 @@ The separate read-only checker is being implemented against its frozen
 [`reproready check` guide](docs/checker.md),
 [`python-v1` ruleset](docs/checker-ruleset-v1.md), and
 [versioned JSON Schema](src/reproready/schemas/check-report-v1.schema.json).
-Bounded intake, member browsing, the `archive.structure` rule, and exact one-based Python and notebook
-source indexing now exist as internal interfaces. The absolute-path and dependency rules, the command,
-and the `check_path()` API are not available yet; the existing score command and API remain unchanged.
+Bounded intake, member browsing, the `archive.structure`, `python.absolute-path`, and
+`python.dependencies` rules, and exact one-based Python and notebook source indexing now exist as
+internal interfaces. Dependency inspection reports lexical imports, direct requirements and PEP 621
+declarations, standard-library modules, obvious local modules, exact normalized matches, and two
+human-review conditions within virtual project and container boundaries. Retained discovery rules,
+the public command, and the `check_path()` API are not available yet; the existing score command and
+API remain unchanged.
 
 ## License
 

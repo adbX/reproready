@@ -17,6 +17,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - exercised only on Python 3.10.
     import tomli as tomllib
 
+from .checker_archive import archive_structure_result
 from .checker_intake import FIXED_LIMITS, SourceSnapshot, WorkerCheckpoint
 from .checker_python import (
     NotebookCellSourceError,
@@ -25,6 +26,26 @@ from .checker_python import (
     notebook_cell_source,
     parse_notebook_document,
     parse_python_source,
+)
+from .checker_python_dependencies import (
+    PACKAGING_VERSION,
+    DeclarationCandidate,
+    DeclarationEvent,
+    ImportCandidate,
+    UnsupportedDependencyContent,
+    VirtualFile,
+    VirtualLocation,
+    collect_import_candidates,
+    minimum_reduced_candidate_size,
+    reduce_pyproject_document,
+    reduce_requirements_source,
+    split_virtual_name,
+    unsupported_dependency_form,
+    validate_pyproject_document,
+)
+from .checker_python_paths import (
+    AbsolutePathCandidate,
+    collect_absolute_path_observations,
 )
 from .checker_report import (
     _BoundedRecords,
@@ -163,6 +184,8 @@ def _member_basename(name: str) -> str:
 def _member_source_form(name: str) -> str | None:
     basename = _member_basename(name)
     folded = basename.casefold()
+    if unsupported_dependency_form(name):
+        return "unsupported_source"
     if folded.endswith(".py"):
         return "python_file"
     if folded.endswith(".ipynb"):
@@ -313,6 +336,18 @@ class InspectionEngine:
         self.members: list[dict[str, object]] = []
         self.sources: list[dict[str, object]] = []
         self._source_descriptors: list[_SourceDescriptor] = []
+        self.absolute_path_observations: list[dict[str, object]] = []
+        self.absolute_path_limit_candidate: AbsolutePathCandidate | None = None
+        self.absolute_path_scan_limited_source: dict[str, object] | None = None
+        self.dependency_imports: list[ImportCandidate] = []
+        self.dependency_declarations: list[DeclarationCandidate] = []
+        self.dependency_unsupported: dict[
+            tuple[str, str], UnsupportedDependencyContent
+        ] = {}
+        self.dependency_source_locations: dict[str, VirtualLocation] = {}
+        self.dependency_candidate_bytes = 0
+        self.dependency_scan_limited_source: dict[str, object] | None = None
+        self.parser_versions: dict[str, str] = {}
         self.targets: list[_Target] = []
         self.target_by_id: dict[str, _Target] = {}
         self.containers: list[_Container] = []
@@ -352,34 +387,128 @@ class InspectionEngine:
             self.sources,
             source,
             member_id=source["member_id"],
+            source_id=source["source_id"],
         )
         if not accepted:
             self._record_limit_stop()
-        return accepted
+            return False
+        member_id = source["member_id"]
+        target = (
+            self.target_by_id.get("artifact")
+            if member_id is None
+            else self.target_by_id.get(str(member_id))
+        )
+        if target is not None:
+            source_id = str(source["source_id"])
+            self.dependency_source_locations[source_id] = VirtualLocation(
+                target.container_id or "direct:0",
+                split_virtual_name(target.name),
+                None if member_id is None else str(member_id),
+                source_id,
+            )
+        return True
+
+    def _add_dependency_unsupported(self, item: UnsupportedDependencyContent) -> None:
+        self.dependency_unsupported.setdefault(
+            (item.source_id, item.reason_code),
+            item,
+        )
+
+    def _retain_dependency_candidate(
+        self, candidate: ImportCandidate | DeclarationCandidate
+    ) -> bool:
+        size = minimum_reduced_candidate_size(candidate)
+        if self.dependency_candidate_bytes + size > FIXED_LIMITS["max_report_bytes"]:
+            if self.dependency_scan_limited_source is None:
+                self.dependency_scan_limited_source = {
+                    "member_id": candidate.location.member_id,
+                    "source_id": candidate.location.source_id,
+                    "line": candidate.line,
+                    "cell": (
+                        candidate.cell
+                        if isinstance(candidate, ImportCandidate)
+                        else None
+                    ),
+                }
+            return False
+        self.dependency_candidate_bytes += size
+        if isinstance(candidate, ImportCandidate):
+            self.dependency_imports.append(candidate)
+        else:
+            self.dependency_declarations.append(candidate)
+        return True
+
+    def _dependency_files(self) -> list[VirtualFile]:
+        source_by_member = {
+            str(source["member_id"]): str(source["source_id"])
+            for source in self.sources
+            if source["member_id"] is not None
+            and source["form"] == "python_file"
+            and source["cell"] is None
+        }
+        files = [
+            VirtualFile(
+                str(member["container_id"]),
+                split_virtual_name(str(member["name"])),
+                str(member["name"]),
+                str(member["member_id"]),
+                source_by_member.get(str(member["member_id"])),
+                str(member["kind"]),
+                ordinal,
+            )
+            for ordinal, member in enumerate(self.members)
+        ]
+        direct_source = next(
+            (
+                source
+                for source in self.sources
+                if source["member_id"] is None and source["form"] == "python_file"
+            ),
+            None,
+        )
+        direct_target = self.target_by_id.get("artifact")
+        if direct_source is not None and direct_target is not None:
+            files.append(
+                VirtualFile(
+                    "direct:0",
+                    split_virtual_name(direct_target.name),
+                    direct_target.name,
+                    None,
+                    str(direct_source["source_id"]),
+                    direct_target.kind,
+                    0,
+                )
+            )
+        return files
 
     def _append_reached_issues(self) -> None:
         member_ids = {str(member["member_id"]) for member in self.members}
+        existing_codes = {str(issue["code"]) for issue in self.inventory_issues}
         for limit in tuple(self.reached_limits):
             if limit not in _LIMIT_ISSUES:
                 continue
             code, message = _LIMIT_ISSUES[limit]
+            if code in existing_codes:
+                continue
             member_id = self._limit_members.get(limit)
             if member_id not in member_ids:
                 member_id = None
             if not self._append_inventory_issue(_issue(code, message, member_id)):
                 return
+            existing_codes.add(code)
 
     def inspect(self) -> dict[str, object]:
         """Build bounded direct or ZIP intake and return its report object."""
 
         self.checkpoint("after_source_read")
+        inspect_sources = False
         if self.detected_kind in _SOURCE_FORMS:
             self._inspect_direct()
-            self._inspect_sources()
+            inspect_sources = True
         elif self.detected_kind == "zip":
             self.parsers.add("zipfile")
             self._inspect_zip()
-            self._inspect_sources()
+            inspect_sources = True
         else:
             self.inventory_status = "unsupported"
             syntax = self.detected_kind.removeprefix("unsupported_").replace("_", " ")
@@ -406,15 +535,40 @@ class InspectionEngine:
                 )
             )
         self._append_reached_issues()
+        archive_result = archive_structure_result(
+            self.detected_kind,
+            self.members,
+            self.inventory_issues,
+            self.reached_limits,
+            append_record=self.records.append,
+        )
+        if inspect_sources:
+            self._inspect_sources()
+        self._append_reached_issues()
         report = successful_intake_report(
             self.snapshot,
             detected_kind=self.detected_kind,
             parsers=self.parsers,
+            parser_versions=self.parser_versions,
             reached_limits=self.reached_limits,
             inventory_status=self.inventory_status,
             members=self.members,
             issues=self.inventory_issues,
             source_index=self.sources,
+            archive_result=archive_result,
+            absolute_path_observations=self.absolute_path_observations,
+            absolute_path_limit_candidate=(
+                None
+                if self.absolute_path_limit_candidate is None
+                else self.absolute_path_limit_candidate.observation
+            ),
+            absolute_path_scan_limited_source=self.absolute_path_scan_limited_source,
+            dependency_imports=self.dependency_imports,
+            dependency_declarations=self.dependency_declarations,
+            dependency_unsupported=list(self.dependency_unsupported.values()),
+            dependency_files=self._dependency_files(),
+            dependency_source_locations=self.dependency_source_locations,
+            dependency_scan_limited_source=self.dependency_scan_limited_source,
             records=self.records,
         )
         if len(encode_report(report)) > FIXED_LIMITS["max_report_bytes"]:
@@ -558,7 +712,11 @@ class InspectionEngine:
                         )
                     )
                     self._reach("max_nested_zip_depth", member_id)
-                elif kind == "file" and not info.flag_bits & 1:
+                elif (
+                    kind == "file"
+                    and not info.flag_bits & 1
+                    and form != "unsupported_source"
+                ):
                     retain = nested_candidate or (
                         form is not None
                         and info.file_size <= FIXED_LIMITS[_SOURCE_LIMITS[form]]
@@ -804,18 +962,72 @@ class InspectionEngine:
     def _inspect_sources(self) -> None:
         descriptors = self._source_descriptors
         self._source_descriptors = []
-        for descriptor in descriptors:
+        for index, descriptor in enumerate(descriptors):
             if self.records.limit_name == "max_report_bytes":
+                self._mark_path_scan_limited(descriptors[index:])
+                self._mark_dependency_scan_limited(descriptors[index:])
                 return
             self._inspect_source(descriptor)
+            if self.records.limit_name == "max_report_bytes":
+                self._mark_path_scan_limited(descriptors[index:])
+                self._mark_dependency_scan_limited(descriptors[index:])
+                return
+
+    def _mark_path_scan_limited(
+        self,
+        descriptors: list[_SourceDescriptor],
+    ) -> None:
+        if self.absolute_path_scan_limited_source is not None:
+            return
+        for descriptor in descriptors:
+            if descriptor.form not in {"python_file", "notebook_document"}:
+                continue
+            self.absolute_path_scan_limited_source = {
+                "member_id": descriptor.target.member_id,
+                "source_id": None,
+            }
+            return
+
+    def _mark_dependency_scan_limited(
+        self,
+        descriptors: list[_SourceDescriptor],
+    ) -> None:
+        if self.dependency_scan_limited_source is not None:
+            return
+        applicable = {
+            "python_file",
+            "notebook_document",
+            "requirements",
+            "pyproject",
+            "unsupported_source",
+        }
+        for descriptor in descriptors:
+            if descriptor.form not in applicable:
+                continue
+            self.dependency_scan_limited_source = {
+                "member_id": descriptor.target.member_id,
+                "source_id": None,
+            }
+            return
 
     def _inspect_source(self, descriptor: _SourceDescriptor) -> None:
         target = descriptor.target
         form = descriptor.form
-        limit_name = _SOURCE_LIMITS[form]
-        size = target.expanded_size
         source_id = f"source:{len(self.sources)}"
         language = "python" if form == "python_file" else None
+        if form == "unsupported_source":
+            self._append_source(
+                _source_record(
+                    source_id,
+                    target.member_id,
+                    form,
+                    "unsupported",
+                    reason_code="unsupported_dependency_form",
+                )
+            )
+            return
+        limit_name = _SOURCE_LIMITS[form]
+        size = target.expanded_size
         if size is not None and size > FIXED_LIMITS[limit_name]:
             self._append_source(
                 _source_record(
@@ -875,16 +1087,19 @@ class InspectionEngine:
             self._inspect_python(target, source_id, None, text)
         elif form == "notebook_document":
             self._inspect_notebook(target, source_id, text)
-        elif form == "pyproject":
+        elif form == "requirements":
+            if not self._append_source(
+                _source_record(source_id, target.member_id, form, "inspected")
+            ):
+                return
+            location = self.dependency_source_locations[source_id]
+            for event in reduce_requirements_source(location, text):
+                self._accept_declaration_event(event)
+        else:
             self.parsers.add("tomllib")
             try:
                 document = tomllib.loads(text)
-                project = document.get("project", {})
-                dependencies = project.get("dependencies", [])
-                if not isinstance(project, dict) or not isinstance(dependencies, list):
-                    raise TypeError
-                if any(not isinstance(item, str) for item in dependencies):
-                    raise TypeError
+                validate_pyproject_document(document)
             except (tomllib.TOMLDecodeError, TypeError, AttributeError):
                 self._append_source(
                     _source_record(
@@ -895,14 +1110,23 @@ class InspectionEngine:
                         reason_code="dependency_parse_error",
                     )
                 )
-            else:
-                self._append_source(
-                    _source_record(source_id, target.member_id, form, "inspected")
-                )
-        else:
-            self._append_source(
+                return
+            if not self._append_source(
                 _source_record(source_id, target.member_id, form, "inspected")
-            )
+            ):
+                return
+            location = self.dependency_source_locations[source_id]
+            for event in reduce_pyproject_document(location, document):
+                self._accept_declaration_event(event)
+
+    def _accept_declaration_event(self, event: DeclarationEvent) -> None:
+        if event.parser_examined:
+            self.parsers.add("packaging")
+            self.parser_versions["packaging"] = PACKAGING_VERSION
+        if event.unsupported is not None:
+            self._add_dependency_unsupported(event.unsupported)
+        if event.candidate is not None:
+            self._retain_dependency_candidate(event.candidate)
 
     def _inspect_python(
         self,
@@ -938,7 +1162,35 @@ class InspectionEngine:
             )
         ):
             return
-        del parsed
+        location = self.dependency_source_locations[source_id]
+        for candidate in collect_import_candidates(parsed, location):
+            if isinstance(candidate, UnsupportedDependencyContent):
+                self._add_dependency_unsupported(candidate)
+            else:
+                self._retain_dependency_candidate(candidate)
+        if self.absolute_path_scan_limited_source is not None:
+            return
+        if self.records.limit_name is not None:
+            self.absolute_path_scan_limited_source = {
+                "member_id": target.member_id,
+                "source_id": source_id,
+            }
+            return
+        for candidate in collect_absolute_path_observations(parsed):
+            observation = candidate.observation
+            if not self.records.append(
+                self.absolute_path_observations,
+                observation,
+                member_id=target.member_id,
+                source_id=source_id,
+                observation=True,
+            ):
+                self.absolute_path_limit_candidate = candidate
+                self.absolute_path_scan_limited_source = {
+                    "member_id": target.member_id,
+                    "source_id": source_id,
+                }
+                break
 
     def _inspect_notebook(
         self,

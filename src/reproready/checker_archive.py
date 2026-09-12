@@ -161,6 +161,7 @@ def _append(
         member_id=record["member_id"],
         source_id=record.get("source_id"),
         observation=observation,
+        rule_id="archive.structure",
     )
 
 

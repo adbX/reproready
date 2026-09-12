@@ -127,7 +127,12 @@ def _notebook(
                         "text": "open('/ignore/output-only')\n",
                     }
                 ],
-                "source": ["import requests\n", "open('/srv/input.csv')\n"],
+                "source": [
+                    "import requests\n",
+                    "open('/srv/input.csv')\n",
+                    "pathlib.Path(r'C:\\notebook\\data')\n",
+                    "example = \"open('/ignore/arbitrary-string')\"\n",
+                ],
             },
             {
                 "cell_type": "raw",
@@ -147,6 +152,7 @@ def _notebook(
         metadata["kernelspec"] = {"language": language, "name": language}
     if language_info is not None:
         metadata["language_info"] = {"name": language_info}
+    metadata["checker_decoy"] = "open('/ignore/raw-json')"
     payload = {
         "cells": cells,
         "metadata": metadata,
@@ -162,6 +168,44 @@ def _nested_zip() -> bytes:
     level_two = _zip_bytes([("three.zip", level_three)])
     level_one = _zip_bytes([("two.zip", level_two)])
     return level_one
+
+
+def _dependency_zip() -> bytes:
+    nested = _zip_bytes(
+        [
+            ("inner/requirements.txt", b"shared-name>=1\ninner-only\n"),
+            ("inner/main.py", b"import shared_name\nimport inner_only\n"),
+        ]
+    )
+    return _zip_bytes(
+        [
+            (
+                "wrapper/root-a/main.py",
+                b"import os\nimport requests as http\nimport local_mod\n"
+                b"import src_mod\nimport missing_name\nfrom . import sibling\n",
+            ),
+            ("wrapper/root-a/notebook.ipynb", _notebook()),
+            ("wrapper/root-a/local_mod.py", b"VALUE = 1\n"),
+            ("wrapper/root-a/src/src_mod/__init__.py", b"VALUE = 2\n"),
+            (
+                "wrapper/root-a/requirements.txt",
+                b"requests>=2\nmissing-name[extra] == 1  # supported comment\n"
+                b"unused-package\n-r other.txt\n",
+            ),
+            (
+                "wrapper/root-a/nested/pyproject.toml",
+                b"[project]\nname = 'nested'\ndependencies = ['nested-pkg']\n",
+            ),
+            (
+                "wrapper/root-a/nested/main.py",
+                b"import nested_pkg\nimport requests\n",
+            ),
+            ("wrapper/loose.py", b"import loose_local\n"),
+            ("wrapper/loose_local.py", b"VALUE = 3\n"),
+            ("wrapper/setup.py", b"from setuptools import setup\n"),
+            ("wrapper/nested.zip", nested),
+        ]
+    )
 
 
 def build_checker_inputs(root: Path) -> CheckerInputSet:
@@ -354,6 +398,7 @@ def build_checker_inputs(root: Path) -> CheckerInputSet:
             "special-python.zip",
             _zip_bytes([("blocked.py", b"", stat.S_IFIFO | 0o644)]),
         ),
+        "dependency_zip": ("dependency-evidence.zip", _dependency_zip()),
     }
     for key, (name, body) in variants.items():
         path = root / name

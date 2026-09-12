@@ -135,16 +135,22 @@ def test_notebook_indexes_only_code_cells_at_physical_positions(
     assert "ignore/output-only" not in parsed.source
     assert "ignore/raw-cell" not in parsed.source
 
-    for rule_id in ("python.absolute-path", "python.dependencies"):
-        result = _rule(report, rule_id)
-        assert [item["source_id"] for item in result["skipped_inputs"]] == [
-            "source:1",
-            "source:2",
-        ]
-        assert {item["reason_code"] for item in result["skipped_inputs"]} == {
-            "rule_not_run"
-        }
-        assert result["failed_inputs"] == []
+    path_result = _rule(report, "python.absolute-path")
+    assert path_result["status"] == "complete"
+    assert path_result["skipped_inputs"] == []
+    assert path_result["failed_inputs"] == []
+
+    dependency_result = _rule(report, "python.dependencies")
+    assert dependency_result["status"] == "complete"
+    assert [
+        (item["kind"], item["value"], item["cell"], item["line"])
+        for item in dependency_result["evidence"]
+    ] == [
+        ("python_import", "requests", 1, 1),
+        ("local_module", ".local", 3, 1),
+    ]
+    assert dependency_result["skipped_inputs"] == []
+    assert dependency_result["failed_inputs"] == []
 
 
 @pytest.mark.parametrize(

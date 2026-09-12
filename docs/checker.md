@@ -11,10 +11,11 @@ The report contract and initial rule semantics are frozen while implementation p
 
 `reproready check` and `check_path()` are not available yet. The current package continues to provide `reproready score` and `score_path()` unchanged.
 
-The bounded browser, `archive.structure` result, and exact Python source index are implemented as
-internal development interfaces, not as a public command or model-assisted checker mode. The browser
-exposes only escaped, bounded data from the completed checker snapshot through stable member identities
-and the versioned list, literal-search, and line-read operations. Both Python semantic rules remain deferred.
+The bounded browser, `archive.structure` result, exact Python source index,
+`python.absolute-path` result, and `python.dependencies` result are implemented as internal
+development interfaces, not as a public command or model-assisted checker mode. The browser exposes
+only escaped, bounded data from the completed checker snapshot through stable member identities and
+the versioned list, literal-search, and line-read operations.
 
 ## Intended interface
 
@@ -50,6 +51,22 @@ The implemented `archive.structure` result maps exact intake facts to member-lin
 separate coverage blockers. Unsupported compression, encryption, links, special entries, unsafe
 names, integrity and central-directory failures, and reached archive limits remain explicit.
 
+The implemented `python.absolute-path` result inspects decoded string literals only in the frozen
+call positions. It classifies device, UNC, drive, POSIX, and tilde syntax without host path APIs and
+reports the complete call syntax with source, member, physical notebook cell, and one-based line
+coordinates. The lexical result does not resolve bindings, aliases, reachability, computed strings,
+or path existence.
+
+The implemented `python.dependencies` result records lexical absolute imports from the same parsed
+Python and notebook contexts, direct requirement declarations, running-runtime standard-library
+names, and obvious local modules. It compares imports with declarations only inside the same virtual
+project root and ZIP container, using lowercase names with runs of hyphen, underscore, and period
+normalized to one hyphen. Exact normalized pairs receive relationships; unmatched imports and
+declarations become separate human-review questions rather than undeclared or unnecessary
+dependency claims. The rule does not resolve bindings, conditional execution, import-to-distribution
+aliases, namespace packages, the installed environment, or package metadata. Unsupported
+declaration forms remain explicit coverage records.
+
 ## Supported inputs
 
 | Input or content | v1 behavior |
@@ -62,7 +79,7 @@ names, integrity and central-directory failures, and reached archive limits rema
 | Nested ZIP | Supported through depth 3 beyond the outer ZIP. |
 | R source and R metadata | Visible but unsupported. No R parser or R rule runs. |
 | Tar, gzip, PDF, DOCX, executables, and other regular files | Produce a valid report naming the unsupported format. |
-| Shell source, `setup.py`, Conda, Poetry, PDM, Pipenv, lock files, constraints, Dockerfiles, and requirement includes | Visible but not semantically analyzed. |
+| Shell source, archived `setup.py`, Conda, Poetry, PDM, Pipenv, lock files, constraints, Dockerfiles, and requirement includes | Visible but not semantically analyzed. A direct `setup.py` follows the direct `.py` classification rule. |
 | Directories, top-level links, devices, sockets, and other non-regular paths | Rejected before content is read. |
 
 The checker supports macOS and Linux. Other operating systems are rejected before the input is read. The score command retains its existing platform and input support.
@@ -79,7 +96,7 @@ The fixed v1 limits are 2 GiB of input, 100,000 members, three nested ZIP levels
 
 Rule results use `complete`, `partial`, `unsupported`, `error`, or `not_applicable`. Findings are independent of coverage. Only a complete result with no observations may be summarized as `no finding in the checks run`; the checker never labels an artifact as passed.
 
-The internal terminal renderer escapes control and bidirectional characters, treats Rich markup as literal text, labels findings and limitations without relying on color, and honors `NO_COLOR`. The future public command will use the same report-driven presentation rules.
+The internal terminal renderer escapes control and bidirectional characters, treats Rich markup as literal text, labels archive, absolute-path, and dependency findings with exact available coordinates and evidence relationships, labels coverage limitations without relying on color, and honors `NO_COLOR`. The future public command will use the same report-driven presentation rules.
 
 ## Process outcomes
 

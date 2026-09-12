@@ -70,7 +70,7 @@ def test_complete_empty_result_alone_receives_no_finding_phrase(
 
     assert "no finding in the checks run" in complete
     assert "no finding in the checks run" not in partial
-    assert "no finding in the checks run" not in direct
+    assert "python.dependencies: complete\nno finding in the checks run" in direct
     assert "passed" not in complete.casefold()
 
 
