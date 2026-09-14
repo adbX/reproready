@@ -8,7 +8,6 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.2.0] - 2026-09-13
 
-
 - Added the public `check_path()` API and `reproready check PATH [--json]` command for the frozen
   eleven-rule `python-v1` static checker. The typed, one-pass API returns schema-v1 reports; the
   bounded terminal view groups observations by topic, elevates inspection limitations, caps examples,

@@ -54,6 +54,7 @@ def parse_python_source(
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", SyntaxWarning)
+        warnings.simplefilter("ignore", DeprecationWarning)
         tree = ast.parse(source)
     return ParsedPythonSource(source_id, member_id, cell, source, tree)
 
