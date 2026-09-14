@@ -9,10 +9,31 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
 
+from reproready.checker_intake import SourceSnapshot, WorkerOutcome
+from reproready.checker_report import incomplete_snapshot_report, worker_failure_report
+
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = ROOT / "src/reproready/schemas/check-report-v1.schema.json"
 FIXTURE_DIR = ROOT / "tests/fixtures/checker-report-v1"
-RULE_IDS = ["archive.structure", "python.absolute-path", "python.dependencies"]
+RULE_IDS = [
+    "archive.structure",
+    "python.absolute-path",
+    "python.dependencies",
+    "python.sys-path-three-dot",
+    "python.download-comment-http-url",
+    "python.open-bundled-archive-member",
+    "python.pandas-csv-inventory-absence",
+    "python.notebook-pip-install",
+    "python.gdown-anonymized-value",
+    "python.entry-point-input",
+    "python.gfile-bucket-authority",
+]
+
+
+def _assert_error_catalogue(report: dict) -> None:
+    assert [result["rule_id"] for result in report["rule_results"]] == RULE_IDS
+    assert {result["status"] for result in report["rule_results"]} == {"error"}
+    assert all(len(result["failed_inputs"]) == 1 for result in report["rule_results"])
 
 
 def _load_json(path: Path) -> dict:
@@ -41,6 +62,37 @@ def test_synthetic_reports_validate(schema: dict, reports: list[dict]) -> None:
     validator = Draft202012Validator(schema)
     for report in reports:
         validator.validate(report)
+
+
+def test_failure_producers_emit_the_complete_catalogue(
+    schema: dict, tmp_path: Path
+) -> None:
+    incomplete = incomplete_snapshot_report(
+        display_name="input.py",
+        size_bytes=0,
+        issue_code="source_missing",
+        message="The source path does not exist.",
+    )
+    worker = worker_failure_report(
+        SourceSnapshot(
+            "input.py",
+            1,
+            "a" * 64,
+            tmp_path / "unused",
+        ),
+        WorkerOutcome(
+            "error",
+            "worker_timeout",
+            "max_elapsed_seconds",
+            "detected_kind:direct_python",
+        ),
+        detected_kind="direct_python",
+    )
+
+    validator = Draft202012Validator(schema)
+    for report in (incomplete, worker):
+        validator.validate(report)
+        _assert_error_catalogue(report)
 
 
 def test_supported_basename_may_contain_backslash(

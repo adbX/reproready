@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+import warnings
 from dataclasses import dataclass
 
 
@@ -51,7 +52,10 @@ def parse_python_source(
 ) -> ParsedPythonSource:
     """Parse one Python source exactly once and retain its identity transiently."""
 
-    return ParsedPythonSource(source_id, member_id, cell, source, ast.parse(source))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", SyntaxWarning)
+        tree = ast.parse(source)
+    return ParsedPythonSource(source_id, member_id, cell, source, tree)
 
 
 def parse_notebook_document(source: str) -> dict[str, object]:

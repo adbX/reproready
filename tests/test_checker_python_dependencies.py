@@ -15,7 +15,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from rich.console import Console
 
-from reproready.checker import encode_intake_report, intake_report
+from reproready.checker import _check_document, _encode_check_document
 from reproready.checker_intake import FIXED_LIMITS, SourceSnapshot
 from reproready.checker_inventory import InspectionEngine
 from reproready.checker_render import render_report
@@ -148,7 +148,7 @@ def test_imports_use_the_existing_ast_and_exact_source_locations(
         encoding="utf-8",
     )
 
-    report = intake_report(path)
+    report = _check_document(path)
     report_validator.validate(report)
     result = _rule(report)
     imports = [item for item in result["evidence"] if item["kind"] == "python_import"]
@@ -225,7 +225,7 @@ def test_notebook_imports_ignore_non_code_surfaces(
         )
     )
 
-    report = intake_report(path)
+    report = _check_document(path)
     report_validator.validate(report)
     evidence = _rule(report)["evidence"]
     assert [
@@ -257,7 +257,7 @@ def test_requirements_reduction_keeps_supported_siblings_and_exact_text(
         encoding="utf-8",
     )
 
-    report = intake_report(path)
+    report = _check_document(path)
     report_validator.validate(report)
     result = _rule(report)
     declarations = [
@@ -302,7 +302,7 @@ def test_pyproject_reads_only_pep621_and_preserves_null_lines(
         encoding="utf-8",
     )
 
-    report = intake_report(path)
+    report = _check_document(path)
     report_validator.validate(report)
     result = _rule(report)
     assert [
@@ -322,7 +322,7 @@ def test_pyproject_reads_only_pep621_and_preserves_null_lines(
     malformed = tmp_path / "malformed" / "pyproject.toml"
     malformed.parent.mkdir()
     malformed.write_text("[project\ndependencies = []\n", encoding="utf-8")
-    malformed_report = intake_report(malformed)
+    malformed_report = _check_document(malformed)
     report_validator.validate(malformed_report)
     malformed_result = _rule(malformed_report)
     assert [item["reason_code"] for item in malformed_result["failed_inputs"]] == [
@@ -331,7 +331,7 @@ def test_pyproject_reads_only_pep621_and_preserves_null_lines(
 
     invalid = tmp_path / "pyproject.toml"
     invalid.write_text("[project]\ndependencies = 'not-an-array'\n", encoding="utf-8")
-    invalid_report = intake_report(invalid)
+    invalid_report = _check_document(invalid)
     report_validator.validate(invalid_report)
     invalid_result = _rule(invalid_report)
     assert invalid_result["status"] == "partial"
@@ -343,7 +343,7 @@ def test_pyproject_reads_only_pep621_and_preserves_null_lines(
 def test_normalized_matches_roots_local_modules_and_containers_are_isolated(
     checker_inputs, report_validator: Draft202012Validator
 ) -> None:
-    report = intake_report(checker_inputs.paths["dependency_zip"])
+    report = _check_document(checker_inputs.paths["dependency_zip"])
     report_validator.validate(report)
     result = _rule(report)
     assert result["status"] == "partial"
@@ -406,7 +406,7 @@ def test_local_module_rules_are_exact_and_do_not_cross_nested_roots(
         ],
     )
 
-    report = intake_report(path)
+    report = _check_document(path)
     report_validator.validate(report)
     result = _rule(report)
     assert not [item for item in result["evidence"] if item["kind"] == "local_module"]
@@ -440,7 +440,7 @@ def test_exact_matches_are_normalized_without_distribution_aliases(
         ],
     )
 
-    report = intake_report(path)
+    report = _check_document(path)
     report_validator.validate(report)
     result = _rule(report)
     reviews = [
@@ -483,7 +483,7 @@ def test_all_explicit_dependency_forms_are_indexed_without_content_reads(
         ],
     )
 
-    report = intake_report(path)
+    report = _check_document(path)
     report_validator.validate(report)
     unsupported_sources = [
         source
@@ -534,7 +534,7 @@ def test_all_four_local_layouts_direct_self_match_and_stdlib_case_are_exact(
         ],
     )
 
-    report = intake_report(path)
+    report = _check_document(path)
     report_validator.validate(report)
     result = _rule(report)
     assert {
@@ -556,7 +556,7 @@ def test_all_four_local_layouts_direct_self_match_and_stdlib_case_are_exact(
 
     direct = tmp_path / "own_module.py"
     direct.write_text("import own_module\n", encoding="utf-8")
-    direct_report = intake_report(direct)
+    direct_report = _check_document(direct)
     report_validator.validate(direct_report)
     direct_result = _rule(direct_report)
     assert [
@@ -591,7 +591,7 @@ def test_same_root_declarations_combine_and_wrapper_fallback_is_all_or_nothing(
             ),
         ],
     )
-    report = intake_report(combined)
+    report = _check_document(combined)
     report_validator.validate(report)
     result = _rule(report)
     assert result["status"] == "complete"
@@ -611,7 +611,7 @@ def test_same_root_declarations_combine_and_wrapper_fallback_is_all_or_nothing(
             ("outside.txt", b"prevents wrapper fallback\n"),
         ],
     )
-    split_report = intake_report(split_wrapper)
+    split_report = _check_document(split_wrapper)
     report_validator.validate(split_report)
     split_result = _rule(split_report)
     assert not [
@@ -749,14 +749,14 @@ def test_dependency_renderer_escapes_values_and_prints_relationships(
     path = tmp_path / "requirements.txt"
     path.write_text("safe_pkg  # [bold]unsafe[/bold]\u0007\u202e\n", encoding="utf-8")
 
-    report = intake_report(path)
+    report = _check_document(path)
     report_validator.validate(report)
     output = _render(report)
-    assert "python.dependencies: complete" in output
-    assert "Evidence: dependency_declaration evidence:0" in output
-    assert "safe_pkg" in output
-    assert "Review: declaration_without_exact_import" in output
+    assert "Dependency declarations without exact imports" in output
+    assert "1 human-review observation" in output
+    assert "requirements.txt · line 1" in output
     assert "[bold]unsafe[/bold]\\u0007\\u202e" in output
+    assert "evidence:0" not in output
     assert "\u0007" not in output
     assert "\u202e" not in output
 
@@ -781,29 +781,28 @@ def test_dependency_renderer_shows_coordinates_relationships_and_coverage(
         ],
     )
 
-    report = intake_report(path)
+    report = _check_document(path)
     report_validator.validate(report)
     output = _render(report)
-    assert "python.dependencies: partial" in output
-    assert (
-        "Evidence: python_import evidence:0 [source:0, member:0, line:1]: matched_name"
-    ) in output
-    assert "(related: evidence:0)" in output
-    assert "Review: import_without_exact_declaration" in output
-    assert "Review: declaration_without_exact_import" in output
-    assert "(evidence: evidence:" in output
-    assert "Skipped: unsupported_dependency_form [source:2, member:2]" in output
-    assert "Failed: syntax_error [source:3, member:3]" in output
-    assert "python.dependencies: partial\nno finding in the checks run" not in output
+    assert output.index("Inspection limitations") < output.index("Overview")
+    assert "Python dependencies (python.dependencies): partial" in output
+    assert "Imports without exact dependency declarations" in output
+    assert "Dependency declarations without exact imports" in output
+    assert "project/main.py · line 2" in output
+    assert "project/requirements.txt · line 2" in output
+    assert "project/setup.py" in output
+    assert "project/broken.py" in output
+    assert "member:" not in output
+    assert "source:" not in output
 
 
 def test_dependency_results_are_runtime_deterministic(
     checker_inputs, report_validator: Draft202012Validator
 ) -> None:
     path = checker_inputs.paths["dependency_zip"]
-    first = intake_report(path)
-    second = intake_report(path)
+    first = _check_document(path)
+    second = _check_document(path)
     report_validator.validate(first)
     assert first == second
-    assert encode_intake_report(path) == encode_intake_report(path)
+    assert _encode_check_document(path) == _encode_check_document(path)
     _assert_dense_and_valid_references(first)

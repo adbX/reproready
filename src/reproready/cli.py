@@ -1,10 +1,4 @@
-"""Command-line entry point: ``reproready score PATH...``.
-
-Scores one or more code artifacts (a directory, ``.zip``, or ``.tar.gz``) and
-renders a readiness report, or emits JSON with ``--json``. ``--validate`` runs
-the single promote-only model call (needs ``ANTHROPIC_API_KEY`` and the ``llm``
-extra: ``pip install 'reproready[llm]'``).
-"""
+"""Command-line entry points for ReproReady scoring and static checking."""
 
 from __future__ import annotations
 
@@ -18,6 +12,10 @@ from rich.panel import Panel
 from rich.table import Table
 
 from . import prompts, routing
+from .checker import check_path
+from .checker_render import render_report as render_check_report
+from .checker_render import report_console
+from .checker_types import CheckInputError
 from .score import ArtifactReport, score_path
 
 console = Console()
@@ -50,6 +48,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--model",
         default=prompts.VALIDATION_MODEL,
         help=f"Model for --validate (default: {prompts.VALIDATION_MODEL}).",
+    )
+    check = sub.add_parser("check", help="Statically inspect one regular file.")
+    check.add_argument(
+        "path",
+        type=Path,
+        metavar="PATH",
+        help="One Python file, notebook, ZIP, or other regular file.",
+    )
+    check.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the complete checker JSON report instead of the terminal summary.",
     )
     return p.parse_args(argv)
 
@@ -159,23 +169,51 @@ def _score_one(path: Path, validate: bool, model: str) -> ArtifactReport:
     return report
 
 
-def main(argv: list[str] | None = None) -> None:
+def _run_check(path: Path, as_json: bool) -> int:
+    try:
+        report = check_path(path)
+        if as_json:
+            json.dump(report.to_dict(), sys.stdout, ensure_ascii=False, indent=2)
+            sys.stdout.write("\n")
+        else:
+            render_check_report(report.to_dict(), report_console())
+    except CheckInputError as error:
+        print(
+            f"reproready check: error: {error.message} ({error.code})",
+            file=sys.stderr,
+        )
+        return 2
+    except Exception:
+        print(
+            "reproready check: error: An internal failure prevented a checker "
+            "report. (internal_error)",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.cmd == "check":
+        return _run_check(args.path, args.json)
+
     reports: list[ArtifactReport] = []
     for path in args.paths:
         if not path.exists():
             console.print(f"[red]no such path: {path}[/]", highlight=False)
-            raise SystemExit(2)
+            return 2
         reports.append(_score_one(path, args.validate, args.model))
 
     if args.json:
         payload = [report_to_dict(r) for r in reports]
         json.dump(payload if len(payload) > 1 else payload[0], sys.stdout, indent=2)
         sys.stdout.write("\n")
-        return
+        return 0
     for report in reports:
         render_report(report)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

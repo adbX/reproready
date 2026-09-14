@@ -10,7 +10,7 @@ import pytest
 from checker_input_fixtures import mutate_source_same_size
 from jsonschema import Draft202012Validator
 
-from reproready.checker import encode_intake_report, intake_report
+from reproready.checker import _check_document, _encode_check_document
 from reproready.checker_archive import archive_structure_result
 from reproready.checker_intake import FIXED_LIMITS, SourceSnapshot
 from reproready.checker_report import (
@@ -44,7 +44,7 @@ def _crash_worker(path: Path, checkpoint) -> bytes:
 def test_complete_zip64_has_complete_empty_archive_result(
     checker_inputs, report_validator: Draft202012Validator
 ) -> None:
-    report = intake_report(checker_inputs.paths["zip64"])
+    report = _check_document(checker_inputs.paths["zip64"])
     report_validator.validate(report)
 
     result = _archive_result(report)
@@ -57,7 +57,7 @@ def test_complete_zip64_has_complete_empty_archive_result(
 def test_hostile_archive_observations_are_member_linked_and_ordered(
     checker_inputs, report_validator: Draft202012Validator
 ) -> None:
-    report = intake_report(checker_inputs.paths["hostile_zip"])
+    report = _check_document(checker_inputs.paths["hostile_zip"])
     report_validator.validate(report)
     result = _archive_result(report)
 
@@ -96,7 +96,7 @@ def test_hostile_archive_observations_are_member_linked_and_ordered(
 
 
 def test_only_repeated_duplicate_ordinals_are_findings(checker_inputs) -> None:
-    report = intake_report(checker_inputs.paths["hostile_zip"])
+    report = _check_document(checker_inputs.paths["hostile_zip"])
     duplicates = [
         member
         for member in report["inventory"]["members"]
@@ -136,7 +136,7 @@ def test_unreadable_members_are_findings_with_partial_coverage(
     condition: str,
     coverage_kind: str,
 ) -> None:
-    report = intake_report(checker_inputs.paths[fixture_name])
+    report = _check_document(checker_inputs.paths[fixture_name])
     report_validator.validate(report)
     result = _archive_result(report)
 
@@ -154,7 +154,7 @@ def test_unreadable_members_are_findings_with_partial_coverage(
 def test_central_directory_failure_is_a_usable_partial_result(
     checker_inputs, report_validator: Draft202012Validator
 ) -> None:
-    report = intake_report(checker_inputs.paths["central_directory_error_zip"])
+    report = _check_document(checker_inputs.paths["central_directory_error_zip"])
     report_validator.validate(report)
     result = _archive_result(report)
 
@@ -171,9 +171,9 @@ def test_central_directory_failure_is_a_usable_partial_result(
 def test_archive_applicability_and_parent_failures_remain_distinct(
     checker_inputs, tmp_path: Path, report_validator: Draft202012Validator
 ) -> None:
-    direct = intake_report(checker_inputs.paths["minimal_python"])
-    unsupported = intake_report(checker_inputs.paths["unsupported_regular"])
-    worker_error = intake_report(
+    direct = _check_document(checker_inputs.paths["minimal_python"])
+    unsupported = _check_document(checker_inputs.paths["unsupported_regular"])
+    worker_error = _check_document(
         checker_inputs.paths["minimal_python"], _worker=_crash_worker
     )
 
@@ -184,7 +184,7 @@ def test_archive_applicability_and_parent_failures_remain_distinct(
         if checkpoint == checker_inputs.mutation_checkpoint:
             mutate_source_same_size(changing)
 
-    snapshot_error = intake_report(changing, _snapshot_checkpoint=mutate)
+    snapshot_error = _check_document(changing, _snapshot_checkpoint=mutate)
     for report in [direct, unsupported, worker_error, snapshot_error]:
         report_validator.validate(report)
 
@@ -202,7 +202,7 @@ def test_observation_cap_keeps_prefix_and_reserved_limit_finding(
         for index in range(FIXED_LIMITS["max_observations"]):
             archive.writestr(f"/unsafe-{index}", b"")
 
-    report = intake_report(archive_path)
+    report = _check_document(archive_path)
     report_validator.validate(report)
     result = _archive_result(report)
     observations = result["observations"]
@@ -221,7 +221,7 @@ def test_observation_cap_keeps_prefix_and_reserved_limit_finding(
     assert [item["reason_code"] for item in result["skipped_inputs"]] == [
         "observation_limit"
     ]
-    assert len(encode_intake_report(archive_path)) <= FIXED_LIMITS["max_report_bytes"]
+    assert len(_encode_check_document(archive_path)) <= FIXED_LIMITS["max_report_bytes"]
 
 
 def test_report_cap_keeps_a_schema_valid_prefix_and_reserved_limit_finding(
@@ -314,8 +314,8 @@ def test_report_cap_keeps_a_schema_valid_prefix_and_reserved_limit_finding(
 
 
 def test_repeated_runs_have_stable_report_fields_and_ids(checker_inputs) -> None:
-    first = intake_report(checker_inputs.paths["hostile_zip"])
-    second = intake_report(checker_inputs.paths["hostile_zip"])
+    first = _check_document(checker_inputs.paths["hostile_zip"])
+    second = _check_document(checker_inputs.paths["hostile_zip"])
 
     assert first == second
     observations = [

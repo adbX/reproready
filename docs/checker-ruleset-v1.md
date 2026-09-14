@@ -1,10 +1,18 @@
 # Checker ruleset `python-v1`
 
-The `python-v1` ruleset reports bounded static observations about one regular file. It does not execute artifact code, grade compliance, predict whether code will run, or establish that results are correct. Its three initial rules are emitted once each and in this order:
+The released [`check_path()` and `reproready check` interfaces](checker.md) use the `python-v1` ruleset to report bounded static observations about one regular file. The ruleset does not execute artifact code, grade compliance, predict whether code will run, or establish that results are correct. Its eleven rules are emitted once each and in this order:
 
 1. `archive.structure`
 2. `python.absolute-path`
 3. `python.dependencies`
+4. `python.sys-path-three-dot`
+5. `python.download-comment-http-url`
+6. `python.open-bundled-archive-member`
+7. `python.pandas-csv-inventory-absence`
+8. `python.notebook-pip-install`
+9. `python.gdown-anonymized-value`
+10. `python.entry-point-input`
+11. `python.gfile-bucket-authority`
 
 The ruleset version identifies the rule catalogue and semantics. The separate report `schema_version` identifies the JSON shape. Adding a rule or changing a selector requires a new ruleset version; adding or changing a report field requires a new schema version.
 
@@ -24,7 +32,7 @@ Every rule result has one status:
 
 Skipped and failed inputs remain attached to each affected rule. A supported source that fails to decode or parse prevents that rule from reporting complete coverage. Unsupported source-like content remains in the member inventory or source index even when it does not affect an unrelated Python rule.
 
-The JSON Schema enforces field shape, the three initial rule positions, and status relationships that are expressible in JSON Schema. The report producer also enforces unique IDs, no dangling member, source, or evidence references, matching parent and observation rule IDs, and no duplicate discovered rule IDs. `complete` has no skipped or failed inputs; `partial` has at least one; `unsupported` has a skipped top-level input and no evidence or observations; `error` has at least one failed input; and `not_applicable` has no evidence, observations, skipped inputs, or failed inputs.
+The JSON Schema enforces field shape, the eleven rule positions, and status relationships that are expressible in JSON Schema. The report producer also enforces unique dense IDs, no dangling member, source, or evidence references, matching parent and observation rule IDs, and no duplicate discovered rule IDs. `complete` has no skipped or failed inputs; `partial` has at least one; `unsupported` has a skipped top-level input and no evidence or observations; `error` has at least one failed input; and `not_applicable` has no evidence, observations, skipped inputs, or failed inputs.
 
 ## Input classification
 
@@ -166,3 +174,63 @@ An obvious local module is a matching `name.py` or `name/__init__.py` beneath th
 An import that is neither a running-runtime standard-library name, an obvious local module, nor an exact declaration match produces `needs_human_review`. A declaration without an exact import match also produces `needs_human_review`; it may be a valid tool, plugin, optional, or transitive dependency. These observations ask a person to interpret non-identical evidence and do not claim that a dependency is missing.
 
 Poetry, PDM, Pipenv, Conda, lock files, Dockerfiles, constraints, requirement includes, namespace-package inference, optional groups, and `setup.py` remain unsupported in this ruleset. Their presence is retained in inventory and makes dependency coverage partial when the file is source-like for dependency review.
+
+## `python.sys-path-three-dot`
+
+This rule applies only to successfully parsed `.py` files. It resolves unchanged direct bindings created by `from sys import path` or `from sys import path as alias`, then selects `alias.append(literal)` with one positional argument and no keywords. The decoded literal is split on `/` and `\`, and the rule emits `three_dot_path_segment` only when one segment is exactly `...`.
+
+The selector excludes `..`, four dots, substrings, computed values, `import sys; sys.path.append(...)`, notebook code, and rebound aliases. Its review question is whether the exact three-dot segment is an intentional directory name or an artifact-specific path assumption. The checker does not inspect the filesystem, infer reachability, or decide that the path is invalid.
+
+## `python.download-comment-http-url`
+
+This lexical rule applies to tokenizable `.py` files and supported Python notebook code cells. A standard-library `tokenize` `COMMENT` token emits `download_comment_with_http_url` when the same decoded physical line contains the case-insensitive whole word `download` and a URL whose parsed scheme is `http` or `https`. The bounded snippet is the complete physical comment line, while trailing sentence punctuation is excluded from URL recognition.
+
+Strings, Markdown and raw cells, outputs, split-line instructions, non-HTTP locations, and comments missing either required element do not match. Tokenization is independent of AST parsing, so this result can be complete when another Python rule is partial. Its review question is whether the comment describes a manual acquisition step, an optional operation, or background information.
+
+## `python.open-bundled-archive-member`
+
+This rule applies to parsed `.py` files and supported Python notebook cells inside a ZIP inventory. It selects unshadowed builtin `open()` calls with a supported relative POSIX literal, or a simple name with one earlier unreassigned literal binding in the same module or ordered notebook namespace. Omitted mode is read mode. A literal mode must contain `r`, contain none of `w`, `a`, or `x`, and otherwise be a valid text, binary, or update-mode combination.
+
+The source's own container must have no member at the normalized archive-root-relative path. Exactly one readable regular member at that path must exist in a descendant ZIP container. The observation `read_path_only_in_bundled_archive` relates to one `bundled_archive_member` evidence record. Zero, duplicate, unreadable, unrelated-container, wrapper-directory, dynamically computed, explicit archive-reader, and incomplete-inventory cases do not produce the observation.
+
+The review question is whether the artifact's runtime makes the nested member available at the read path. The exact static relationship does not establish extraction, mounting, call reachability, or the effect of earlier calls.
+
+## `python.pandas-csv-inventory-absence`
+
+This rule applies only to parsed `.py` members when the complete artifact inventory has no skipped discovery or listing limit. It resolves an unchanged `import pandas` binding and selects `alias.read_csv(path)` when the first positional argument is a supported relative POSIX literal or a name assigned exactly once earlier at module scope to such a literal.
+
+The normalized literal is compared case-sensitively with archive-root-relative and source-parent-relative locations in the source's own container. The rule emits `pandas_csv_not_in_inventory` only when neither location is represented. Direct `.py` input, notebook cells, `from pandas import read_csv`, keyword-only operands, constructed paths, function parameters, URIs, other readers, and incomplete inventories do not produce the observation.
+
+The review question is whether another documented step, mount, generation process, or runtime environment supplies the path. The checker does not search the host filesystem, cross ZIP containers, relate a similarly named file with another extension, or claim that runtime data is missing.
+
+## `python.notebook-pip-install`
+
+This rule applies only to reconstructable code-cell source in supported nbformat 4 Python notebooks. It examines one-based logical source lines whose first non-whitespace character is `!`, then parses the remainder with standard-library `shlex` in POSIX mode. The first two literal tokens must be exactly `pip` and `install` to emit `notebook_pip_install`.
+
+The bounded snippet is the complete logical line. `%pip`, `python -m pip`, subprocess calls, comments, dynamically assembled commands, Markdown cells, `.py` files, and other package managers do not match. An unterminated shell quote or continuation produces `notebook_shell_parse_error` for this rule. The command is not treated as dependency evidence.
+
+The review question is whether the notebook command represents a required setup step, an optional convenience, or historical material. The checker does not run the command or interpret its operands as a complete environment declaration.
+
+## `python.gdown-anonymized-value`
+
+This rule applies to parsed `.py` modules and supported Python notebook cells processed in document order. It requires a nonempty dictionary literal assigned to a simple module or notebook-global name, with explicit entries and every value exactly equal to the case-sensitive string `ANONYMIZED`. Dictionary unpacking, mixed values, mutation, rebinding, or an unavailable intervening notebook cell invalidates the relation.
+
+An unchanged direct `import gdown` binding must call `.download()` with a first positional argument that receives a qualifying dictionary subscript directly, inside an f-string, or inside string concatenation. One intervening simple-name assignment is supported in the same straight-line lexical scope. The rule does not propagate across branches or loops, follow helpers, aliases, returns, files, environment values, or more than one assignment edge.
+
+Each `anonymized_download_identifier` observation relates to `anonymized_mapping_value` evidence at the first value literal. Evidence is reused for repeated calls through the same unchanged mapping. The review question is whether anonymization is intentional or whether another release step supplies a concrete identifier. The checker does not claim that the call executes or that the value prevents a download.
+
+## `python.entry-point-input`
+
+This rule applies to parsed `.py` files and supported Python notebook cells. It selects an unshadowed builtin `input()` call inside the executable statement subtree of a module-level `if __name__ == \"__main__\":` guard. It descends through expressions and control statements, but not into nested function, class, or lambda bodies merely because their definitions appear in the guard.
+
+Reversed comparisons, membership tests, nonliteral sentinels, functions called by the guard, `sys.stdin`, and contexts that lexically bind `input` do not match. An unavailable intervening notebook cell invalidates prior carry state. The `entry_point_stdin` observation is located at the call.
+
+The review question is how stdin is supplied for this entry point. Redirected or piped input is a valid interpretation, so the checker does not claim that a person must type a value.
+
+## `python.gfile-bucket-authority`
+
+This rule applies only to parsed `.py` files. It resolves unchanged direct imports from `tensorflow.io.gfile`, qualified `tensorflow.io.gfile.GFile` references, and their direct aliases. It also resolves direct `os.path.join`, `os` aliases, `from os import path` aliases, and `from os.path import join` aliases.
+
+The first positional `GFile` argument must be a decoded literal or a supported join expression whose first component is a decoded literal. Lexical URI parsing must find scheme `gs` and the case-sensitive authority exactly `bucket` to emit `bucket_authority_literal`. Another authority, credentials, a port, uppercase or suffixed authority, another scheme, keyword-only file operands, formatting, concatenation, reassignment, wrappers, dynamically assembled paths, and notebooks do not match.
+
+The review question is whether `bucket` names a real Google Cloud Storage bucket or an artifact-specific value that needs interpretation. The authority is legal, so the checker does not label it a placeholder or test network access.

@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -30,3 +31,33 @@ jobs:
         uses: astral-sh/setup-uv@v5
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} pytest
+
+  build-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Build wheel and source distribution
+        run: uv build
+      - name: Install wheel and exercise public surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv venv --python 3.13 .ci-wheel
+          uv pip install --python .ci-wheel/bin/python dist/*.whl
+          printf '%s\n' "open('/ci/input.csv')" > /tmp/checker-smoke.py
+          mkdir /tmp/score-smoke
+          printf '%s\n' "print('score smoke')" > /tmp/score-smoke/main.py
+          printf '%s\n' "# Score smoke" > /tmp/score-smoke/README.md
+          env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN \
+            .ci-wheel/bin/python -c \
+            "import json; from importlib.resources import files; from reproready import check_path; json.loads(files('reproready').joinpath('schemas/check-report-v1.schema.json').read_text()); assert check_path('/tmp/checker-smoke.py').schema_version == '1'"
+          env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN \
+            .ci-wheel/bin/reproready check /tmp/checker-smoke.py > /tmp/checker-smoke.txt
+          env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN \
+            .ci-wheel/bin/reproready check /tmp/checker-smoke.py --json > /tmp/checker-smoke.json
+          env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN \
+            .ci-wheel/bin/reproready score /tmp/score-smoke --json > /tmp/score-smoke.json
+          .ci-wheel/bin/python -c \
+            "import json; from pathlib import Path; assert json.loads(Path('/tmp/checker-smoke.json').read_text())['schema_version'] == '1'; assert '\\x1b[' not in Path('/tmp/checker-smoke.txt').read_text(); assert 'r' in json.loads(Path('/tmp/score-smoke.json').read_text())"

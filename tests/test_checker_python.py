@@ -14,7 +14,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from reproready import checker_inventory
-from reproready.checker import encode_intake_report, intake_report
+from reproready.checker import _check_document, _encode_check_document
 from reproready.checker_intake import FIXED_LIMITS, SourceSnapshot
 from reproready.checker_inventory import InspectionEngine
 from reproready.checker_python import parse_python_source
@@ -62,7 +62,7 @@ def test_direct_python_has_exact_one_based_multiline_location(
     path = tmp_path / "location.py"
     path.write_text(source, encoding="utf-8")
 
-    report = intake_report(path)
+    report = _check_document(path)
     report_validator.validate(report)
     assert report["source_index"] == [
         {
@@ -91,15 +91,29 @@ def test_direct_python_has_exact_one_based_multiline_location(
     with pytest.raises(RuntimeError, match="positive one-based line"):
         parsed.location(ast.Pass())
 
-    encoded = encode_intake_report(path)
+    encoded = _encode_check_document(path)
     assert str(tmp_path).encode() not in encoded
+
+
+def test_python_parser_does_not_emit_artifact_syntax_warnings() -> None:
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", SyntaxWarning)
+        parsed = parse_python_source(
+            "source:0",
+            None,
+            None,
+            r"value = '\e'" + "\n",
+        )
+
+    assert caught == []
+    assert isinstance(parsed.tree.body[0], ast.Assign)
 
 
 def test_notebook_indexes_only_code_cells_at_physical_positions(
     checker_inputs, report_validator: Draft202012Validator
 ) -> None:
     path = checker_inputs.paths["valid_notebook"]
-    report = intake_report(path)
+    report = _check_document(path)
     report_validator.validate(report)
 
     assert [
@@ -118,6 +132,7 @@ def test_notebook_indexes_only_code_cells_at_physical_positions(
     assert [parser["name"] for parser in report["runtime"]["parsers"]] == [
         "ast",
         "json",
+        "tokenize",
     ]
 
     notebook = json.loads(path.read_text(encoding="utf-8"))
@@ -239,7 +254,7 @@ def test_notebook_indexes_only_code_cells_at_physical_positions(
                     "unsupported_notebook_syntax",
                 ),
             ],
-            ["json"],
+            ["json", "tokenize"],
             "python",
         ),
         (
@@ -252,7 +267,7 @@ def test_notebook_indexes_only_code_cells_at_physical_positions(
                     "unsupported_notebook_syntax",
                 ),
             ],
-            ["json"],
+            ["json", "shlex", "tokenize"],
             "python",
         ),
         (
@@ -274,7 +289,7 @@ def test_notebook_indexes_only_code_cells_at_physical_positions(
                 ("notebook_document", "inspected", None),
                 ("notebook_code_cell", "error", "syntax_error"),
             ],
-            ["ast", "json"],
+            ["ast", "json", "tokenize"],
             "python",
         ),
     ],
@@ -287,7 +302,7 @@ def test_notebook_outcomes_and_parser_metadata_are_distinct(
     parsers: list[str],
     language: str | None,
 ) -> None:
-    report = intake_report(checker_inputs.paths[fixture_name])
+    report = _check_document(checker_inputs.paths[fixture_name])
     report_validator.validate(report)
 
     assert [
@@ -309,7 +324,7 @@ def test_unsupported_language_is_bounded_without_partial_python_coverage(
     path = tmp_path / "long-language.ipynb"
     path.write_text(json.dumps(payload), encoding="utf-8")
 
-    report = intake_report(path)
+    report = _check_document(path)
     report_validator.validate(report)
     assert report["source_index"][0]["language"] is None
     for rule_id in ("python.absolute-path", "python.dependencies"):
@@ -341,7 +356,7 @@ def test_zip_source_order_follows_global_member_preorder_without_path_exclusions
         ],
     )
 
-    report = intake_report(path)
+    report = _check_document(path)
     report_validator.validate(report)
     assert [
         (source["source_id"], source["member_id"], source["status"])
@@ -390,7 +405,7 @@ def test_source_like_member_read_blockers_remain_indexed(
     reason_code: str,
     coverage_kind: str,
 ) -> None:
-    report = intake_report(checker_inputs.paths[fixture_name])
+    report = _check_document(checker_inputs.paths[fixture_name])
     report_validator.validate(report)
     source = next(
         source for source in report["source_index"] if source["member_id"] == member_id
@@ -458,8 +473,8 @@ def test_parser_limit_skips_before_ast_is_invoked(
 def test_malformed_notebook_blocks_coverage_but_unsupported_notebook_does_not(
     checker_inputs,
 ) -> None:
-    malformed = intake_report(checker_inputs.paths["malformed_notebook"])
-    unsupported = intake_report(checker_inputs.paths["unsupported_version_notebook"])
+    malformed = _check_document(checker_inputs.paths["malformed_notebook"])
+    unsupported = _check_document(checker_inputs.paths["unsupported_version_notebook"])
 
     for rule_id in ("python.absolute-path", "python.dependencies"):
         malformed_result = _rule(malformed, rule_id)

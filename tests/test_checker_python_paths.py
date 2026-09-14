@@ -12,7 +12,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from rich.console import Console
 
-from reproready.checker import encode_intake_report, intake_report
+from reproready.checker import _check_document, _encode_check_document
 from reproready.checker_intake import FIXED_LIMITS, SourceSnapshot
 from reproready.checker_inventory import InspectionEngine
 from reproready.checker_render import render_report
@@ -44,7 +44,7 @@ def _python_report(
 ) -> dict[str, object]:
     path = tmp_path / name
     path.write_text(source, encoding="utf-8")
-    report = intake_report(path)
+    report = _check_document(path)
     validator.validate(report)
     return report
 
@@ -329,7 +329,7 @@ def test_direct_and_notebook_locations_use_exact_full_call_syntax(
     )
     archive_path = tmp_path / "notebook.zip"
     _write_zip(archive_path, [("analysis.ipynb", notebook)])
-    report = intake_report(archive_path)
+    report = _check_document(archive_path)
     report_validator.validate(report)
     observation = _rule(report)["observations"][0]
     assert (
@@ -345,7 +345,7 @@ def test_direct_and_notebook_locations_use_exact_full_call_syntax(
         2,
         "open('/notebook/path')",
     )
-    encoded = encode_intake_report(archive_path)
+    encoded = _encode_check_document(archive_path)
     for decoy in (b"/markdown", b"/output", b"/raw", b"/ignore/raw-json"):
         assert decoy not in encoded
     assert str(tmp_path).encode() not in encoded
@@ -354,7 +354,7 @@ def test_direct_and_notebook_locations_use_exact_full_call_syntax(
 def test_fixture_notebook_excludes_outputs_raw_cells_and_arbitrary_strings(
     checker_inputs, report_validator: Draft202012Validator
 ) -> None:
-    report = intake_report(checker_inputs.paths["valid_notebook"])
+    report = _check_document(checker_inputs.paths["valid_notebook"])
     report_validator.validate(report)
     result = _rule(report)
 
@@ -400,8 +400,8 @@ def test_snippet_bound_and_terminal_escaping_preserve_complete_coverage(
         name="hostile.py",
     )
     output = _render(hostile_report)
-    assert "python.absolute-path: complete" in output
-    assert "posix_absolute_path [source:0, line:1]" in output
+    assert "POSIX absolute path literals" in output
+    assert "hostile.py · line 1" in output
     assert "[bold]unsafe[/bold]\\u0007\\u202e" in output
     assert "\u0007" not in output
     assert "\u202e" not in output
@@ -438,7 +438,7 @@ def test_observations_sort_by_source_location_and_follow_archive_ids(
         ],
     )
 
-    report = intake_report(archive_path)
+    report = _check_document(archive_path)
     report_validator.validate(report)
     archive_observations = report["rule_results"][0]["observations"]
     path_observations = _rule(report)["observations"]
@@ -464,11 +464,11 @@ def test_path_statuses_and_coverage_are_independent_from_findings(
     complete = _rule(
         _python_report(tmp_path, "value = 1\n", report_validator, name="complete.py")
     )
-    not_applicable = _rule(intake_report(checker_inputs.paths["requirements"]))
-    unsupported = _rule(intake_report(checker_inputs.paths["unsupported_regular"]))
-    malformed = _rule(intake_report(checker_inputs.paths["malformed_notebook"]))
-    non_python = _rule(intake_report(checker_inputs.paths["unsupported_notebook"]))
-    no_code = _rule(intake_report(checker_inputs.paths["no_code_notebook"]))
+    not_applicable = _rule(_check_document(checker_inputs.paths["requirements"]))
+    unsupported = _rule(_check_document(checker_inputs.paths["unsupported_regular"]))
+    malformed = _rule(_check_document(checker_inputs.paths["malformed_notebook"]))
+    non_python = _rule(_check_document(checker_inputs.paths["unsupported_notebook"]))
+    no_code = _rule(_check_document(checker_inputs.paths["no_code_notebook"]))
 
     assert complete["status"] == "complete"
     assert not_applicable["status"] == "not_applicable"
@@ -485,7 +485,7 @@ def test_path_statuses_and_coverage_are_independent_from_findings(
         archive_path,
         [("good.py", b"open('/kept')\n"), ("broken.py", b"def broken(:\n")],
     )
-    mixed = intake_report(archive_path)
+    mixed = _check_document(archive_path)
     report_validator.validate(mixed)
     result = _rule(mixed)
     assert result["status"] == "partial"
@@ -493,7 +493,7 @@ def test_path_statuses_and_coverage_are_independent_from_findings(
     assert [item["reason_code"] for item in result["failed_inputs"]] == ["syntax_error"]
 
     discovery = _rule(
-        intake_report(checker_inputs.paths["central_directory_error_zip"])
+        _check_document(checker_inputs.paths["central_directory_error_zip"])
     )
     assert discovery["status"] == "partial"
     assert any(
@@ -600,9 +600,9 @@ def test_repeated_runs_have_identical_path_results_and_encoded_fields(
     checker_inputs, report_validator: Draft202012Validator
 ) -> None:
     path = checker_inputs.paths["absolute_paths"]
-    first = intake_report(path)
-    second = intake_report(path)
+    first = _check_document(path)
+    second = _check_document(path)
     report_validator.validate(first)
     assert first == second
-    assert encode_intake_report(path) == encode_intake_report(path)
+    assert _encode_check_document(path) == _encode_check_document(path)
     assert _rule(first)["status"] == "complete"

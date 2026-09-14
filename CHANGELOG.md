@@ -6,6 +6,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-13
+
+
+- Added the public `check_path()` API and `reproready check PATH [--json]` command for the frozen
+  eleven-rule `python-v1` static checker. The typed, one-pass API returns schema-v1 reports; the
+  bounded terminal view groups observations by topic, elevates inspection limitations, caps examples,
+  and leaves the complete retained record in JSON. Existing score behavior remains separate.
+- Implemented all eight retained `python-v1` human-review rules over the existing bounded source and
+  inventory pass. The eleven-rule catalogue now reports exact three-dot `sys.path` segments,
+  download comments with HTTP URLs, reads represented only in nested ZIPs, pandas CSV paths absent
+  from a complete container inventory, notebook `!pip install` lines, bounded anonymized-value flows
+  to `gdown.download`, stdin calls in canonical entry points, and exact `gs://bucket` authorities in
+  resolved `GFile` calls. Rule-specific coverage, dense supporting evidence, global limit ownership,
+  deterministic schema-valid JSON, and terminal-safe generic rendering remain internal; the public
+  command and `check_path()` remain unavailable.
 - Implemented the internal `python.dependencies` rule over each transient parsed Python source,
   supported notebook code cell, direct requirement declaration, and PEP 621
   `project.dependencies` array. The rule emits lexical import, declaration, running-runtime
@@ -63,5 +78,6 @@ Initial release.
 - Optional `--validate` promote-only model call (the `llm` extra; needs
   `ANTHROPIC_API_KEY`).
 
-[Unreleased]: https://github.com/adbX/reproready/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/adbX/reproready/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/adbX/reproready/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/adbX/reproready/releases/tag/v0.1.0

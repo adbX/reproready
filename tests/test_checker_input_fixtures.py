@@ -25,6 +25,8 @@ EXPECTED_CASES = {
     "conflicting_language_notebook",
     "docx_named_zip",
     "dependency_zip",
+    "evidence_heavy_limited_zip",
+    "evidence_heavy_zip",
     "encrypted_zip",
     "hostile_zip",
     "malformed_notebook",

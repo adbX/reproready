@@ -26,6 +26,15 @@ from .checker_python_dependencies import (
     VirtualLocation,
     analyze_dependencies,
 )
+from .checker_python_review import (
+    RETAINED_RULE_IDS,
+    ReviewCollector,
+    ReviewGap,
+    applicable_source_records,
+)
+from .checker_python_review import (
+    ReviewCandidate as RetainedCandidate,
+)
 
 SCHEMA_VERSION = "1"
 RULESET_VERSION = "python-v1"
@@ -33,6 +42,7 @@ RULE_IDS = (
     "archive.structure",
     "python.absolute-path",
     "python.dependencies",
+    *RETAINED_RULE_IDS,
 )
 _REQUIREMENTS_NAME = re.compile(r"requirements.*\.txt", re.IGNORECASE)
 _UNSUPPORTED_KINDS = {
@@ -133,6 +143,74 @@ class _BoundedRecords:
             self.observation_count += 1
         return True
 
+    def append_group(
+        self,
+        records: Sequence[tuple[list[dict[str, object]], dict[str, object], bool]],
+        *,
+        member_id: str | None = None,
+        source_id: str | None = None,
+        rule_id: str,
+    ) -> bool:
+        """Atomically admit related records and their observation."""
+
+        if self.ordinary_closed or self.limit_name is not None:
+            return False
+        observation_count = sum(observation for _, _, observation in records)
+        if self.observation_count + observation_count >= self.max_observations:
+            self._reach(
+                "max_observations",
+                member_id,
+                source_id,
+                rule_id,
+            )
+            return False
+        staged_counts: dict[int, int] = {}
+        encoded_size = 0
+        for collection, record, _ in records:
+            collection_id = id(collection)
+            prior = staged_counts.get(collection_id, 0)
+            encoded_size += len(
+                json.dumps(
+                    record,
+                    ensure_ascii=True,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+            if collection or prior:
+                encoded_size += 1
+            staged_counts[collection_id] = prior + 1
+        if (
+            self.record_bytes + encoded_size + self.reserve_bytes
+            > self.max_report_bytes
+        ):
+            self._reach(
+                "max_report_bytes",
+                member_id,
+                source_id,
+                rule_id,
+            )
+            return False
+        for collection, record, observation in records:
+            collection.append(record)
+            if observation:
+                self.observation_count += 1
+        self.record_bytes += encoded_size
+        return True
+
+    def reach_limit(
+        self,
+        limit_name: str,
+        *,
+        member_id: str | None,
+        source_id: str | None,
+        rule_id: str,
+    ) -> None:
+        """Record an analysis-time candidate stop against the global limit."""
+
+        if self.limit_name is None:
+            self._reach(limit_name, member_id, source_id, rule_id)
+
     def append_reserved(
         self,
         collection: list[dict[str, object]],
@@ -161,7 +239,7 @@ def tool_version() -> str:
     try:
         return version("reproready")
     except PackageNotFoundError:
-        return "0.1.0"
+        return "0.2.0"
 
 
 def classify_name(display_name: str) -> str | None:
@@ -721,6 +799,229 @@ def dependency_result(
     return result, output_limited_source
 
 
+def _retained_inventory_gaps(
+    members: Sequence[Mapping[str, object]],
+    issues: Sequence[Mapping[str, object]],
+) -> list[ReviewGap]:
+    mutable_members = [dict(member) for member in members]
+    mutable_issues = [dict(issue) for issue in issues]
+    return [
+        ReviewGap(
+            None if coverage["member_id"] is None else str(coverage["member_id"]),
+            None,
+            str(coverage["reason_code"]),
+            str(coverage["message"]),
+            field == "failed_inputs",
+        )
+        for field, coverage in _discovery_coverage(mutable_members, mutable_issues)
+    ]
+
+
+def _retained_observation(
+    candidate: RetainedCandidate,
+    evidence_ids: list[str],
+) -> dict[str, object]:
+    return {
+        "observation_id": "observation:9999",
+        "rule_id": candidate.rule_id,
+        "kind": "needs_human_review",
+        "condition_code": candidate.condition_code,
+        "member_id": candidate.member_id,
+        "source_id": candidate.source_id,
+        "line": candidate.line,
+        "cell": candidate.cell,
+        "snippet": candidate.snippet,
+        "snippet_truncated": candidate.snippet_truncated,
+        "evidence_ids": evidence_ids,
+    }
+
+
+def _retained_evidence(
+    candidate: RetainedCandidate,
+    evidence_id: str,
+) -> dict[str, object]:
+    evidence = candidate.evidence
+    if evidence is None:
+        raise RuntimeError(
+            "retained evidence construction requires an evidence candidate"
+        )
+    return {
+        "evidence_id": evidence_id,
+        "kind": evidence.kind,
+        "member_id": evidence.member_id,
+        "source_id": evidence.source_id,
+        "line": evidence.line,
+        "cell": evidence.cell,
+        "value": evidence.value,
+        "related_evidence_ids": [],
+    }
+
+
+def retained_results(
+    *,
+    detected_kind: str,
+    inventory_status: str,
+    members: Sequence[Mapping[str, object]],
+    issues: Sequence[Mapping[str, object]],
+    source_index: Sequence[Mapping[str, object]],
+    collector: ReviewCollector,
+    records: _BoundedRecords,
+    evidence_start: int,
+) -> tuple[list[dict[str, object]], dict[str, RetainedCandidate | ReviewGap]]:
+    """Finalize retained results in catalogue order under global capacities."""
+
+    results: list[dict[str, object]] = []
+    blocked_sources: dict[str, RetainedCandidate | ReviewGap] = {}
+    evidence_number = evidence_start
+    inventory_gaps = _retained_inventory_gaps(members, issues)
+
+    for rule_id in RETAINED_RULE_IDS:
+        applicable, source_gaps = applicable_source_records(
+            rule_id,
+            detected_kind,
+            source_index,
+            collector,
+        )
+        if detected_kind in _UNSUPPORTED_KINDS:
+            coverage = _coverage_item(
+                "unsupported_format",
+                "The top-level regular file is not a supported Python input.",
+            )
+            result = _rule_result(rule_id, "unsupported")
+            if not records.append(
+                result["skipped_inputs"],
+                coverage,
+                rule_id=rule_id,
+            ):
+                records.append_reserved(result["skipped_inputs"], coverage)
+            results.append(result)
+            continue
+
+        gaps = list(source_gaps)
+        if applicable and rule_id in {
+            "python.open-bundled-archive-member",
+            "python.pandas-csv-inventory-absence",
+        }:
+            gaps.extend(inventory_gaps)
+        gaps.sort(key=ReviewGap.sort_key)
+        candidates = collector.resolved_candidates(
+            rule_id,
+            members,
+            (
+                "partial"
+                if inventory_gaps
+                and rule_id
+                in {
+                    "python.open-bundled-archive-member",
+                    "python.pandas-csv-inventory-absence",
+                }
+                else inventory_status
+            ),
+        )
+        omitted = collector.omitted.get(rule_id)
+        if not applicable and not gaps:
+            results.append(_rule_result(rule_id, "not_applicable"))
+            continue
+
+        result = _rule_result(
+            rule_id,
+            "partial" if gaps or omitted is not None else "complete",
+        )
+        results.append(result)
+        work_blocked = False
+        for gap in gaps:
+            field = "failed_inputs" if gap.failed else "skipped_inputs"
+            coverage = _coverage_item(
+                gap.reason_code,
+                gap.message,
+                member_id=gap.member_id,
+                source_id=gap.source_id,
+            )
+            if records.append(
+                result[field],
+                coverage,
+                member_id=gap.member_id,
+                source_id=gap.source_id,
+                rule_id=rule_id,
+            ):
+                continue
+            work_blocked = True
+            blocked_sources.setdefault(rule_id, gap)
+            break
+
+        evidence_ids: dict[tuple[object, ...], str] = {}
+        admitted_candidates = 0
+        if not work_blocked:
+            for candidate in candidates:
+                evidence_id = None
+                evidence_record = None
+                if candidate.evidence is not None:
+                    evidence_id = evidence_ids.get(candidate.evidence.key)
+                    if evidence_id is None:
+                        evidence_id = f"evidence:{evidence_number}"
+                        evidence_record = _retained_evidence(candidate, evidence_id)
+                observation = _retained_observation(
+                    candidate,
+                    [] if evidence_id is None else [evidence_id],
+                )
+                if evidence_record is None:
+                    accepted = records.append(
+                        result["observations"],
+                        observation,
+                        member_id=candidate.member_id,
+                        source_id=candidate.source_id,
+                        observation=True,
+                        rule_id=rule_id,
+                    )
+                else:
+                    accepted = records.append_group(
+                        (
+                            (result["evidence"], evidence_record, False),
+                            (result["observations"], observation, True),
+                        ),
+                        member_id=candidate.member_id,
+                        source_id=candidate.source_id,
+                        rule_id=rule_id,
+                    )
+                if not accepted:
+                    work_blocked = True
+                    blocked_sources.setdefault(rule_id, candidate)
+                    break
+                if evidence_record is not None and candidate.evidence is not None:
+                    evidence_ids[candidate.evidence.key] = evidence_id
+                    evidence_number += 1
+                admitted_candidates += 1
+
+        omitted_work = omitted is not None or admitted_candidates < len(candidates)
+        if omitted is not None and records.limit_name is None:
+            records.reach_limit(
+                "max_observations",
+                member_id=omitted.member_id,
+                source_id=omitted.source_id,
+                rule_id=rule_id,
+            )
+            blocked_sources.setdefault(rule_id, omitted)
+            work_blocked = True
+        if work_blocked or omitted_work:
+            result["status"] = "partial"
+            if records.blocked_rule_id != rule_id:
+                issue_code, issue_message = _TERMINAL_LIMIT_ISSUES[
+                    records.limit_name or "max_report_bytes"
+                ]
+                source = blocked_sources.get(rule_id)
+                coverage = _coverage_item(
+                    issue_code,
+                    issue_message,
+                    member_id=None if source is None else source.member_id,
+                    source_id=None if source is None else source.source_id,
+                )
+                records.append_reserved(result["skipped_inputs"], coverage)
+        elif gaps:
+            result["status"] = "partial"
+
+    return results, blocked_sources
+
+
 def _issue_key(issue: dict[str, object]) -> tuple[int, str, str]:
     member_id = issue["member_id"]
     member_ordinal = -1 if member_id is None else int(str(member_id).split(":", 1)[1])
@@ -810,7 +1111,48 @@ def _dependency_limit_records(
     return observation, coverage
 
 
-def _assert_dependency_references(
+def _retained_limit_records(
+    limit: str,
+    rule_id: str,
+    source: RetainedCandidate | ReviewGap | None,
+    source_ids: set[str],
+    member_ids: set[str],
+) -> tuple[dict[str, object], dict[str, object]]:
+    issue_code, issue_message = _TERMINAL_LIMIT_ISSUES[limit]
+    source_id = None if source is None else source.source_id
+    if source_id not in source_ids:
+        source_id = None
+    member_id = None if source is None else source.member_id
+    if member_id not in member_ids:
+        member_id = None
+    candidate = source if isinstance(source, RetainedCandidate) else None
+    observation = {
+        "observation_id": "observation:9999",
+        "rule_id": rule_id,
+        "kind": "finding",
+        "condition_code": "resource_limit_reached",
+        "member_id": member_id,
+        "source_id": source_id,
+        "line": candidate.line if source_id is not None and candidate else None,
+        "cell": candidate.cell if source_id is not None and candidate else None,
+        "snippet": candidate.snippet if source_id is not None and candidate else None,
+        "snippet_truncated": (
+            candidate.snippet_truncated
+            if source_id is not None and candidate
+            else False
+        ),
+        "evidence_ids": [],
+    }
+    coverage = _coverage_item(
+        issue_code,
+        issue_message,
+        member_id=member_id,
+        source_id=source_id,
+    )
+    return observation, coverage
+
+
+def _assert_report_references(
     rule_results: Sequence[Mapping[str, object]],
     source_index: Sequence[Mapping[str, object]],
     members: Sequence[Mapping[str, object]],
@@ -825,45 +1167,60 @@ def _assert_dependency_references(
         f"observation:{index}" for index in range(len(observation_ids))
     ]:
         raise RuntimeError("checker observation IDs must be dense and ordered")
-    admitted_evidence = set(evidence_ids)
     admitted_sources = {str(source["source_id"]) for source in source_index}
     admitted_members = {str(member["member_id"]) for member in members}
-    for item in evidence:
-        current = int(str(item["evidence_id"]).split(":", 1)[1])
-        for related in item["related_evidence_ids"]:
-            if (
-                related not in admitted_evidence
-                or int(str(related).split(":", 1)[1]) >= current
-            ):
-                raise RuntimeError(
-                    "checker evidence relationships must be backward-only"
-                )
-        if item["source_id"] is not None and item["source_id"] not in admitted_sources:
-            raise RuntimeError("checker evidence references an omitted source")
-        if item["member_id"] is not None and item["member_id"] not in admitted_members:
-            raise RuntimeError("checker evidence references an omitted member")
-    for item in observations:
-        if not set(item["evidence_ids"]) <= admitted_evidence:
-            raise RuntimeError("checker observation references omitted evidence")
-        if item["source_id"] is not None and item["source_id"] not in admitted_sources:
-            raise RuntimeError("checker observation references an omitted source")
-        if item["member_id"] is not None and item["member_id"] not in admitted_members:
-            raise RuntimeError("checker observation references an omitted member")
-    dependency = next(
-        result for result in rule_results if result["rule_id"] == "python.dependencies"
-    )
-    for field in ("skipped_inputs", "failed_inputs"):
-        for item in dependency[field]:
+    for result in rule_results:
+        result_evidence = {str(item["evidence_id"]) for item in result["evidence"]}
+        for item in result["evidence"]:
+            current = int(str(item["evidence_id"]).split(":", 1)[1])
+            for related in item["related_evidence_ids"]:
+                if (
+                    related not in result_evidence
+                    or int(str(related).split(":", 1)[1]) >= current
+                ):
+                    raise RuntimeError(
+                        "checker evidence relationships must be backward-only "
+                        "within one rule"
+                    )
             if (
                 item["source_id"] is not None
                 and item["source_id"] not in admitted_sources
             ):
-                raise RuntimeError("dependency coverage references an omitted source")
+                raise RuntimeError("checker evidence references an omitted source")
             if (
                 item["member_id"] is not None
                 and item["member_id"] not in admitted_members
             ):
-                raise RuntimeError("dependency coverage references an omitted member")
+                raise RuntimeError("checker evidence references an omitted member")
+        for item in result["observations"]:
+            if item["rule_id"] != result["rule_id"]:
+                raise RuntimeError("checker observation belongs to the wrong rule")
+            if not set(item["evidence_ids"]) <= result_evidence:
+                raise RuntimeError(
+                    "checker observation references omitted rule evidence"
+                )
+            if (
+                item["source_id"] is not None
+                and item["source_id"] not in admitted_sources
+            ):
+                raise RuntimeError("checker observation references an omitted source")
+            if (
+                item["member_id"] is not None
+                and item["member_id"] not in admitted_members
+            ):
+                raise RuntimeError("checker observation references an omitted member")
+        for field in ("skipped_inputs", "failed_inputs"):
+            for item in result[field]:
+                if (
+                    item["source_id"] is not None
+                    and item["source_id"] not in admitted_sources
+                ):
+                    raise RuntimeError("checker coverage references an omitted source")
+                if (
+                    item["member_id"] is not None
+                    and item["member_id"] not in admitted_members
+                ):
+                    raise RuntimeError("checker coverage references an omitted member")
 
 
 def successful_intake_report(
@@ -887,6 +1244,7 @@ def successful_intake_report(
     dependency_files: Sequence[VirtualFile] = (),
     dependency_source_locations: Mapping[str, VirtualLocation] | None = None,
     dependency_scan_limited_source: dict[str, object] | None = None,
+    python_review: ReviewCollector | None = None,
     records: _BoundedRecords | None = None,
 ) -> dict[str, object]:
     """Build one schema-shaped report for completed snapshot intake."""
@@ -918,7 +1276,17 @@ def successful_intake_report(
         dependency_scan_limited_source,
         evidence_start=evidence_start,
     )
-    rule_results = [archive_result, path_result, dependency]
+    retained, retained_limit_sources = retained_results(
+        detected_kind=detected_kind,
+        inventory_status=inventory_status,
+        members=members,
+        issues=issues,
+        source_index=source_index,
+        collector=python_review or ReviewCollector(),
+        records=bounded,
+        evidence_start=evidence_start + len(dependency["evidence"]),
+    )
+    rule_results = [archive_result, path_result, dependency, *retained]
     if bounded.limit_name is not None:
         limit = bounded.limit_name
         if limit not in reached_limits:
@@ -961,6 +1329,22 @@ def successful_intake_report(
             bounded.append_reserved(dependency["observations"], observation)
             bounded.append_reserved(dependency["skipped_inputs"], coverage)
             dependency["status"] = "partial"
+        elif bounded.blocked_rule_id in RETAINED_RULE_IDS:
+            retained_result = next(
+                result
+                for result in retained
+                if result["rule_id"] == bounded.blocked_rule_id
+            )
+            observation, coverage = _retained_limit_records(
+                limit,
+                str(bounded.blocked_rule_id),
+                retained_limit_sources.get(str(bounded.blocked_rule_id)),
+                {str(source["source_id"]) for source in source_index},
+                set(member_by_id),
+            )
+            bounded.append_reserved(retained_result["observations"], observation)
+            bounded.append_reserved(retained_result["skipped_inputs"], coverage)
+            retained_result["status"] = "partial"
         else:
             observation, coverage = archive_limit_records(limit, member)
             bounded.append_reserved(archive_result["observations"], observation)
@@ -969,7 +1353,7 @@ def successful_intake_report(
             sort_archive_result(archive_result)
     issues.sort(key=_issue_key)
     _assign_observation_ids(rule_results)
-    _assert_dependency_references(rule_results, source_index, members)
+    _assert_report_references(rule_results, source_index, members)
     limit_order = {name: index for index, name in enumerate(FIXED_LIMITS)}
     reached_limits.sort(key=limit_order.__getitem__)
     return {
@@ -1010,6 +1394,14 @@ def incomplete_snapshot_report(
         "No archive inspection ran because source snapshotting failed.",
         "No Python inspection ran because source snapshotting failed.",
         "No dependency inspection ran because source snapshotting failed.",
+        "No three-dot sys.path inspection ran because source snapshotting failed.",
+        "No download-comment inspection ran because source snapshotting failed.",
+        "No bundled-archive read inspection ran because source snapshotting failed.",
+        "No pandas CSV inventory inspection ran because source snapshotting failed.",
+        "No notebook pip inspection ran because source snapshotting failed.",
+        "No anonymized gdown inspection ran because source snapshotting failed.",
+        "No entry-point input inspection ran because source snapshotting failed.",
+        "No GFile authority inspection ran because source snapshotting failed.",
     )
     return {
         "schema_version": SCHEMA_VERSION,

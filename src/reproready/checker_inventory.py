@@ -47,6 +47,7 @@ from .checker_python_paths import (
     AbsolutePathCandidate,
     collect_absolute_path_observations,
 )
+from .checker_python_review import ReviewCollector
 from .checker_report import (
     _BoundedRecords,
     classify_snapshot,
@@ -348,6 +349,7 @@ class InspectionEngine:
         self.dependency_candidate_bytes = 0
         self.dependency_scan_limited_source: dict[str, object] | None = None
         self.parser_versions: dict[str, str] = {}
+        self.python_review = ReviewCollector()
         self.targets: list[_Target] = []
         self.target_by_id: dict[str, _Target] = {}
         self.containers: list[_Container] = []
@@ -569,6 +571,7 @@ class InspectionEngine:
             dependency_files=self._dependency_files(),
             dependency_source_locations=self.dependency_source_locations,
             dependency_scan_limited_source=self.dependency_scan_limited_source,
+            python_review=self.python_review,
             records=self.records,
         )
         if len(encode_report(report)) > FIXED_LIMITS["max_report_bytes"]:
@@ -1135,6 +1138,14 @@ class InspectionEngine:
         cell: int | None,
         source: str,
     ) -> None:
+        if cell is None:
+            self.parsers.add("tokenize")
+            self.python_review.inspect_python_lexical(
+                source_id,
+                target.member_id,
+                cell,
+                source,
+            )
         self.parsers.add("ast")
         try:
             parsed = parse_python_source(source_id, target.member_id, cell, source)
@@ -1150,6 +1161,8 @@ class InspectionEngine:
                     reason_code="syntax_error",
                 )
             )
+            if cell is not None:
+                self.python_review.invalidate_notebook(target.member_id)
             return
         if not self._append_source(
             _source_record(
@@ -1162,6 +1175,7 @@ class InspectionEngine:
             )
         ):
             return
+        self.python_review.inspect_parsed(parsed)
         location = self.dependency_source_locations[source_id]
         for candidate in collect_import_candidates(parsed, location):
             if isinstance(candidate, UnsupportedDependencyContent):
@@ -1210,6 +1224,11 @@ class InspectionEngine:
                     "error",
                     reason_code="notebook_parse_error",
                 )
+            )
+            self.python_review.notebook_document_gap(
+                target.member_id,
+                document_id,
+                "notebook_parse_error",
             )
             return
         if type(document.get("nbformat")) is not int or document["nbformat"] != 4:
@@ -1262,10 +1281,12 @@ class InspectionEngine:
         )
         if not accepted:
             return
+        self.python_review.begin_notebook(target.member_id)
         cells = document["cells"]
         assert isinstance(cells, list)
         for cell_number, cell in enumerate(cells, start=1):
             if self.records.limit_name == "max_report_bytes":
+                self.python_review.end_notebook(target.member_id)
                 return
             if not isinstance(cell, dict) or cell.get("cell_type") != "code":
                 continue
@@ -1285,6 +1306,7 @@ class InspectionEngine:
                         reason_code="notebook_cell_source_error",
                     )
                 )
+                self.python_review.invalidate_notebook(target.member_id)
                 continue
             if source_bytes > FIXED_LIMITS["max_python_source_bytes"]:
                 self._append_source(
@@ -1299,7 +1321,22 @@ class InspectionEngine:
                     )
                 )
                 self._reach("max_python_source_bytes", target.member_id)
+                self.python_review.invalidate_notebook(target.member_id)
                 continue
+            self.parsers.add("tokenize")
+            self.python_review.inspect_python_lexical(
+                source_id,
+                target.member_id,
+                cell_number,
+                source,
+            )
+            if self.python_review.inspect_notebook_shell(
+                source_id,
+                target.member_id,
+                cell_number,
+                source,
+            ):
+                self.parsers.add("shlex")
             if has_unsupported_notebook_syntax(source):
                 self._append_source(
                     _source_record(
@@ -1312,8 +1349,10 @@ class InspectionEngine:
                         reason_code="unsupported_notebook_syntax",
                     )
                 )
+                self.python_review.invalidate_notebook(target.member_id)
                 continue
             self._inspect_python(target, source_id, cell_number, source)
+        self.python_review.end_notebook(target.member_id)
 
     def _target_blocker(self, target: _Target) -> tuple[str, str]:
         if target.member is None:

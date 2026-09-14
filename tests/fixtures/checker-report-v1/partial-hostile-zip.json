@@ -1,6 +1,6 @@
 {
   "schema_version": "1",
-  "tool_version": "0.2.0.dev0",
+  "tool_version": "0.2.0",
   "ruleset_version": "python-v1",
   "artifact": {
     "display_name": "report\u001b[31m.zip",
@@ -23,6 +23,10 @@
       {
         "name": "packaging",
         "version": "26.3"
+      },
+      {
+        "name": "tokenize",
+        "version": "3.13.7"
       },
       {
         "name": "zipfile",
@@ -58,7 +62,7 @@
         "container_id": "container:0",
         "member_id": "member:0",
         "parent_member_id": null,
-        "name": "/tmp/\u202eevil.py",
+        "name": "/tmp/‮evil.py",
         "duplicate_ordinal": 1,
         "kind": "file",
         "compressed_size": 42,
@@ -82,7 +86,7 @@
         "container_id": "container:0",
         "member_id": "member:1",
         "parent_member_id": null,
-        "name": "/tmp/\u202eevil.py",
+        "name": "/tmp/‮evil.py",
         "duplicate_ordinal": 2,
         "kind": "file",
         "compressed_size": 9,
@@ -226,7 +230,7 @@
           "source_id": null,
           "line": null,
           "cell": null,
-          "snippet": "/tmp/\u202eevil.py",
+          "snippet": "/tmp/‮evil.py",
           "snippet_truncated": false,
           "evidence_ids": []
         },
@@ -239,7 +243,7 @@
           "source_id": null,
           "line": null,
           "cell": null,
-          "snippet": "/tmp/\u202eevil.py",
+          "snippet": "/tmp/‮evil.py",
           "snippet_truncated": false,
           "evidence_ids": []
         },
@@ -367,6 +371,126 @@
           "source_id": "source:1",
           "reason_code": "syntax_error",
           "message": "Imports could not be read from this source."
+        }
+      ]
+    },
+    {
+      "rule_id": "python.sys-path-three-dot",
+      "status": "partial",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": [
+        {
+          "member_id": "member:1",
+          "source_id": "source:1",
+          "reason_code": "syntax_error",
+          "message": "This applicable Python input failed during rule inspection."
+        }
+      ]
+    },
+    {
+      "rule_id": "python.download-comment-http-url",
+      "status": "complete",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": []
+    },
+    {
+      "rule_id": "python.open-bundled-archive-member",
+      "status": "partial",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [
+        {
+          "member_id": "member:5",
+          "source_id": null,
+          "reason_code": "nested_zip_depth_limit",
+          "message": "At least one nested ZIP was inventoried but not opened beyond depth 3."
+        }
+      ],
+      "failed_inputs": [
+        {
+          "member_id": "member:1",
+          "source_id": "source:1",
+          "reason_code": "syntax_error",
+          "message": "This applicable Python input failed during rule inspection."
+        }
+      ]
+    },
+    {
+      "rule_id": "python.pandas-csv-inventory-absence",
+      "status": "partial",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [
+        {
+          "member_id": "member:5",
+          "source_id": null,
+          "reason_code": "nested_zip_depth_limit",
+          "message": "At least one nested ZIP was inventoried but not opened beyond depth 3."
+        }
+      ],
+      "failed_inputs": [
+        {
+          "member_id": "member:1",
+          "source_id": "source:1",
+          "reason_code": "syntax_error",
+          "message": "This applicable Python input failed during rule inspection."
+        }
+      ]
+    },
+    {
+      "rule_id": "python.notebook-pip-install",
+      "status": "not_applicable",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": []
+    },
+    {
+      "rule_id": "python.gdown-anonymized-value",
+      "status": "partial",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": [
+        {
+          "member_id": "member:1",
+          "source_id": "source:1",
+          "reason_code": "syntax_error",
+          "message": "This applicable Python input failed during rule inspection."
+        }
+      ]
+    },
+    {
+      "rule_id": "python.entry-point-input",
+      "status": "partial",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": [
+        {
+          "member_id": "member:1",
+          "source_id": "source:1",
+          "reason_code": "syntax_error",
+          "message": "This applicable Python input failed during rule inspection."
+        }
+      ]
+    },
+    {
+      "rule_id": "python.gfile-bucket-authority",
+      "status": "partial",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": [
+        {
+          "member_id": "member:1",
+          "source_id": "source:1",
+          "reason_code": "syntax_error",
+          "message": "This applicable Python input failed during rule inspection."
         }
       ]
     }

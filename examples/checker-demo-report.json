@@ -3,26 +3,26 @@
   "tool_version": "0.2.0",
   "ruleset_version": "python-v1",
   "artifact": {
-    "display_name": "clean.py",
+    "display_name": "checker-demo.py",
     "detected_kind": "direct_python",
-    "size_bytes": 12,
-    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "size_bytes": 404,
+    "sha256": "30b0cd805ccacfa11757da8cf869916c5c4173038d7a0e771bd86913bc5ec909",
     "snapshot_complete": true
   },
   "runtime": {
-    "system": "linux",
+    "system": "macos",
     "python": {
       "implementation": "CPython",
-      "version": "3.13.7"
+      "version": "3.13.3"
     },
     "parsers": [
       {
         "name": "ast",
-        "version": "3.13.7"
+        "version": "3.13.3"
       },
       {
         "name": "tokenize",
-        "version": "3.13.7"
+        "version": "3.13.3"
       }
     ]
   },
@@ -74,14 +74,73 @@
       "rule_id": "python.absolute-path",
       "status": "complete",
       "evidence": [],
-      "observations": [],
+      "observations": [
+        {
+          "observation_id": "observation:0",
+          "rule_id": "python.absolute-path",
+          "kind": "finding",
+          "condition_code": "posix_absolute_path",
+          "member_id": null,
+          "source_id": "source:0",
+          "line": 12,
+          "cell": null,
+          "snippet": "Path(\"/example/data.csv\")",
+          "snippet_truncated": false,
+          "evidence_ids": []
+        }
+      ],
       "skipped_inputs": [],
       "failed_inputs": []
     },
     {
       "rule_id": "python.dependencies",
       "status": "complete",
-      "evidence": [],
+      "evidence": [
+        {
+          "evidence_id": "evidence:0",
+          "kind": "python_import",
+          "member_id": null,
+          "source_id": "source:0",
+          "line": 8,
+          "cell": null,
+          "value": "pathlib",
+          "related_evidence_ids": []
+        },
+        {
+          "evidence_id": "evidence:1",
+          "kind": "standard_library",
+          "member_id": null,
+          "source_id": "source:0",
+          "line": 8,
+          "cell": null,
+          "value": "pathlib",
+          "related_evidence_ids": [
+            "evidence:0"
+          ]
+        },
+        {
+          "evidence_id": "evidence:2",
+          "kind": "python_import",
+          "member_id": null,
+          "source_id": "source:0",
+          "line": 9,
+          "cell": null,
+          "value": "sys",
+          "related_evidence_ids": []
+        },
+        {
+          "evidence_id": "evidence:3",
+          "kind": "standard_library",
+          "member_id": null,
+          "source_id": "source:0",
+          "line": 9,
+          "cell": null,
+          "value": "sys",
+          "related_evidence_ids": [
+            "evidence:2"
+          ]
+        }
+      ],
       "observations": [],
       "skipped_inputs": [],
       "failed_inputs": []
@@ -90,7 +149,21 @@
       "rule_id": "python.sys-path-three-dot",
       "status": "complete",
       "evidence": [],
-      "observations": [],
+      "observations": [
+        {
+          "observation_id": "observation:1",
+          "rule_id": "python.sys-path-three-dot",
+          "kind": "needs_human_review",
+          "condition_code": "three_dot_path_segment",
+          "member_id": null,
+          "source_id": "source:0",
+          "line": 13,
+          "cell": null,
+          "snippet": "path.append(\".../vendor\")",
+          "snippet_truncated": false,
+          "evidence_ids": []
+        }
+      ],
       "skipped_inputs": [],
       "failed_inputs": []
     },
@@ -98,7 +171,21 @@
       "rule_id": "python.download-comment-http-url",
       "status": "complete",
       "evidence": [],
-      "observations": [],
+      "observations": [
+        {
+          "observation_id": "observation:2",
+          "rule_id": "python.download-comment-http-url",
+          "kind": "needs_human_review",
+          "condition_code": "download_comment_with_http_url",
+          "member_id": null,
+          "source_id": "source:0",
+          "line": 11,
+          "cell": null,
+          "snippet": "# Download https://example.invalid/research-data.zip before analysis.",
+          "snippet_truncated": false,
+          "evidence_ids": []
+        }
+      ],
       "skipped_inputs": [],
       "failed_inputs": []
     },

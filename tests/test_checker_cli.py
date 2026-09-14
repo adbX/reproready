@@ -1,0 +1,213 @@
+"""Subprocess contracts for ``reproready check``."""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+from jsonschema import Draft202012Validator
+
+from reproready import cli
+
+ROOT = Path(__file__).resolve().parent.parent
+DEMO = ROOT / "examples" / "demo-artifact"
+SCHEMA_PATH = ROOT / "src/reproready/schemas/check-report-v1.schema.json"
+
+
+def _run_cli(
+    *arguments: object, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
+    command = [
+        sys.executable,
+        "-m",
+        "reproready.cli",
+        *(str(item) for item in arguments),
+    ]
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+        check=False,
+    )
+
+
+@pytest.fixture(scope="module")
+def report_validator() -> Draft202012Validator:
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    return Draft202012Validator(schema)
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    ["minimal_python", "valid_notebook", "evidence_heavy_zip", "unsupported_regular"],
+)
+def test_terminal_check_accepts_one_regular_file(
+    checker_inputs, fixture_name: str
+) -> None:
+    source = checker_inputs.paths[fixture_name]
+
+    result = _run_cli("check", source)
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert source.name in result.stdout
+    assert "ReproReady static check" in result.stdout
+    assert "Rule status describes inspection coverage" in result.stdout
+    assert "\x1b[" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    ["minimal_python", "valid_notebook", "evidence_heavy_zip", "unsupported_regular"],
+)
+def test_json_check_emits_one_complete_schema_document(
+    checker_inputs,
+    fixture_name: str,
+    report_validator: Draft202012Validator,
+) -> None:
+    result = _run_cli("check", checker_inputs.paths[fixture_name], "--json")
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert result.stdout.endswith("\n")
+    assert "\x1b[" not in result.stdout
+    document = json.loads(result.stdout)
+    assert isinstance(document, dict)
+    assert (
+        document["artifact"]["display_name"] == checker_inputs.paths[fixture_name].name
+    )
+    report_validator.validate(document)
+
+
+def test_json_check_is_deterministic_and_retains_terminal_omissions(
+    checker_inputs,
+) -> None:
+    source = checker_inputs.paths["evidence_heavy_zip"]
+
+    terminal = _run_cli("check", source)
+    first = _run_cli("check", source, "--json")
+    second = _run_cli("check", source, "--json")
+    document = json.loads(first.stdout)
+    dependencies = document["rule_results"][2]
+
+    assert first.returncode == second.returncode == 0
+    assert first.stdout == second.stdout
+    assert len(dependencies["observations"]) == 36
+    assert len(dependencies["evidence"]) > 43
+    assert "package42" in first.stdout
+    assert "package42" not in terminal.stdout
+
+
+@pytest.mark.parametrize(
+    ("case", "code", "message"),
+    [
+        ("missing", "source_not_found", "The input does not exist."),
+        ("directory", "not_regular_file", "The checker accepts one regular file."),
+        (
+            "link",
+            "top_level_link",
+            "A top-level symbolic link is not a supported checker input.",
+        ),
+    ],
+)
+def test_admission_errors_use_exit_two_and_fixed_argparse_style_copy(
+    checker_inputs,
+    tmp_path: Path,
+    case: str,
+    code: str,
+    message: str,
+) -> None:
+    if case == "missing":
+        source = tmp_path / "private-missing-name.py"
+    elif case == "directory":
+        source = tmp_path / "private-directory-name"
+        source.mkdir()
+    else:
+        source = checker_inputs.paths["top_level_link"]
+
+    result = _run_cli("check", source)
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr == f"reproready check: error: {message} ({code})\n"
+    assert str(source) not in result.stderr
+
+
+@pytest.mark.parametrize("extra", ["second.py", "--details", "--validate", "--model"])
+def test_check_parser_rejects_extra_paths_and_unapproved_options(
+    checker_inputs,
+    extra: str,
+) -> None:
+    result = _run_cli("check", checker_inputs.paths["minimal_python"], extra)
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "usage: reproready" in result.stderr
+
+
+def test_unexpected_internal_failure_uses_exit_one_without_exception_text(
+    checker_inputs,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail(_source):
+        raise RuntimeError("private path /owner/secret")
+
+    monkeypatch.setattr(cli, "check_path", fail)
+
+    exit_code = cli.main(["check", str(checker_inputs.paths["minimal_python"])])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err == (
+        "reproready check: error: An internal failure prevented a checker report. "
+        "(internal_error)\n"
+    )
+    assert "private" not in captured.err
+
+
+def test_hostile_artifact_text_is_literal_and_terminal_safe(tmp_path: Path) -> None:
+    source = tmp_path / "report[red]\u0007\u202e.py"
+    source.write_text("open('/unsafe')\n", encoding="utf-8")
+
+    result = _run_cli("check", source)
+
+    assert result.returncode == 0
+    assert "report[red]\\u0007\\u202e.py" in result.stdout
+    assert "\u0007" not in result.stdout
+    assert "\u202e" not in result.stdout
+    assert "\x1b[" not in result.stdout
+
+
+def test_no_color_keeps_plain_redirected_output(checker_inputs) -> None:
+    environment = os.environ.copy()
+    environment["NO_COLOR"] = "1"
+
+    result = _run_cli(
+        "check",
+        checker_inputs.paths["evidence_heavy_zip"],
+        env=environment,
+    )
+
+    assert result.returncode == 0
+    assert "\x1b[" not in result.stdout
+    assert "36 human-review observations" in result.stdout
+
+
+def test_existing_score_command_keeps_single_and_multiple_json_shapes() -> None:
+    single = _run_cli("score", DEMO, "--json")
+    multiple = _run_cli("score", DEMO, DEMO, "--json")
+
+    assert single.returncode == multiple.returncode == 0
+    single_document = json.loads(single.stdout)
+    multiple_document = json.loads(multiple.stdout)
+    assert single_document["r"] == pytest.approx(0.75**0.25)
+    assert single_document["tier"] == "3"
+    assert multiple_document == [single_document, single_document]

@@ -170,6 +170,22 @@ def _nested_zip() -> bytes:
     return level_one
 
 
+def _evidence_heavy_zip(*, with_nested_limit: bool = False) -> bytes:
+    declarations = [f"package{index}" for index in range(43)]
+    source_lines = [f"import package{index}" for index in range(7)]
+    source_lines.extend(["import os", "import sys", "import json"] * 20)
+    entries: list[tuple[str, bytes]] = [
+        ("project/main.py", ("\n".join(source_lines) + "\n").encode()),
+        (
+            "project/requirements.txt",
+            ("\n".join(declarations) + "\n").encode(),
+        ),
+    ]
+    if with_nested_limit:
+        entries.append(("one.zip", _nested_zip()))
+    return _zip_bytes(entries)
+
+
 def _dependency_zip() -> bytes:
     nested = _zip_bytes(
         [
@@ -399,6 +415,14 @@ def build_checker_inputs(root: Path) -> CheckerInputSet:
             _zip_bytes([("blocked.py", b"", stat.S_IFIFO | 0o644)]),
         ),
         "dependency_zip": ("dependency-evidence.zip", _dependency_zip()),
+        "evidence_heavy_zip": (
+            "evidence-heavy.zip",
+            _evidence_heavy_zip(),
+        ),
+        "evidence_heavy_limited_zip": (
+            "evidence-heavy-limited.zip",
+            _evidence_heavy_zip(with_nested_limit=True),
+        ),
     }
     for key, (name, body) in variants.items():
         path = root / name

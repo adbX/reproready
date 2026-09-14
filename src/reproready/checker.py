@@ -1,4 +1,4 @@
-"""Internal report pipeline while public checker rules remain under development."""
+"""One-pass report production and the public static-checker entry point."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from .checker_report import (
     incomplete_snapshot_report,
     worker_failure_report,
 )
+from .checker_types import CheckInputError, CheckReport
 
 
 def _report_worker(
@@ -53,7 +54,7 @@ def _safe_input_identity(source: str | os.PathLike[str]) -> tuple[str, int]:
     return display_name, max(0, size_bytes)
 
 
-def intake_report(
+def _check_document(
     source: str | os.PathLike[str],
     *,
     _worker: InspectionWorker | None = None,
@@ -63,7 +64,6 @@ def intake_report(
 ) -> dict[str, object]:
     """Produce one schema-shaped bounded-intake report without exposing checker API."""
 
-    display_name, size_bytes = _safe_input_identity(source)
     try:
         with snapshot_source(source, _checkpoint=_snapshot_checkpoint) as snapshot:
             worker: InspectionWorker = _worker or partial(
@@ -100,6 +100,7 @@ def intake_report(
                 detected_kind=detected_kind,
             )
     except SnapshotError as error:
+        display_name, size_bytes = _safe_input_identity(source)
         reached = "max_input_bytes" if error.code == "max_input_bytes" else None
         return incomplete_snapshot_report(
             display_name=display_name,
@@ -108,14 +109,22 @@ def intake_report(
             message=error.message,
             reached_limit=reached,
         )
-    except InputRejectedError:
-        raise
 
 
-def encode_intake_report(
+def check_path(source: str | os.PathLike[str]) -> CheckReport:
+    """Inspect one regular file and return its typed static-checker report."""
+
+    try:
+        document = _check_document(source)
+    except InputRejectedError as error:
+        raise CheckInputError(error.code, error.message) from None
+    return CheckReport._from_document(document)
+
+
+def _encode_check_document(
     source: str | os.PathLike[str],
     **options: object,
 ) -> bytes:
-    """Serialize one internal intake report deterministically."""
+    """Serialize one private checker document deterministically."""
 
-    return encode_report(intake_report(source, **options))
+    return encode_report(_check_document(source, **options))

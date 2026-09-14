@@ -11,7 +11,7 @@ import pytest
 from checker_input_fixtures import mutate_source_same_size
 from jsonschema import Draft202012Validator
 
-from reproready.checker import intake_report
+from reproready.checker import _check_document
 from reproready.checker_browser import (
     BROWSER_VERSION,
     BrowserProtocolError,
@@ -238,7 +238,7 @@ def test_contained_worker_failures_become_schema_valid_reports(
     issue_code: str,
     reached: str | None,
 ) -> None:
-    report = intake_report(
+    report = _check_document(
         checker_inputs.paths["minimal_python"],
         _worker=worker,
         _max_elapsed_seconds=elapsed,
@@ -259,7 +259,7 @@ def test_source_mutation_becomes_schema_valid_incomplete_snapshot_report(
     source = tmp_path / "changing.py"
     source.write_bytes(checker_inputs.paths["mutable_source"].read_bytes())
 
-    report = intake_report(
+    report = _check_document(
         source,
         _snapshot_checkpoint=lambda _checkpoint: mutate_source_same_size(source),
     )
@@ -424,7 +424,7 @@ def test_member_name_reports_every_applicable_safety_issue(tmp_path: Path) -> No
     artifact = tmp_path / "unsafe.zip"
     with zipfile.ZipFile(artifact, "w") as archive:
         archive.writestr("/../unsafe\u0001.py", "print('unsafe name')\n")
-    report = intake_report(artifact)
+    report = _check_document(artifact)
     assert [issue["code"] for issue in report["inventory"]["members"][0]["issues"]] == [
         "absolute_member_path",
         "parent_path_segment",

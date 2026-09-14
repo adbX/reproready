@@ -1,6 +1,6 @@
 {
   "schema_version": "1",
-  "tool_version": "0.2.0.dev0",
+  "tool_version": "0.2.0",
   "ruleset_version": "python-v1",
   "artifact": {
     "display_name": "changing.py",
@@ -91,6 +91,126 @@
           "source_id": null,
           "reason_code": "source_changed",
           "message": "No dependency inspection ran because the source changed during snapshotting."
+        }
+      ]
+    },
+    {
+      "rule_id": "python.sys-path-three-dot",
+      "status": "error",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": [
+        {
+          "member_id": null,
+          "source_id": null,
+          "reason_code": "source_changed",
+          "message": "No retained Python review inspection ran because source snapshotting failed."
+        }
+      ]
+    },
+    {
+      "rule_id": "python.download-comment-http-url",
+      "status": "error",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": [
+        {
+          "member_id": null,
+          "source_id": null,
+          "reason_code": "source_changed",
+          "message": "No retained Python review inspection ran because source snapshotting failed."
+        }
+      ]
+    },
+    {
+      "rule_id": "python.open-bundled-archive-member",
+      "status": "error",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": [
+        {
+          "member_id": null,
+          "source_id": null,
+          "reason_code": "source_changed",
+          "message": "No retained Python review inspection ran because source snapshotting failed."
+        }
+      ]
+    },
+    {
+      "rule_id": "python.pandas-csv-inventory-absence",
+      "status": "error",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": [
+        {
+          "member_id": null,
+          "source_id": null,
+          "reason_code": "source_changed",
+          "message": "No retained Python review inspection ran because source snapshotting failed."
+        }
+      ]
+    },
+    {
+      "rule_id": "python.notebook-pip-install",
+      "status": "error",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": [
+        {
+          "member_id": null,
+          "source_id": null,
+          "reason_code": "source_changed",
+          "message": "No retained Python review inspection ran because source snapshotting failed."
+        }
+      ]
+    },
+    {
+      "rule_id": "python.gdown-anonymized-value",
+      "status": "error",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": [
+        {
+          "member_id": null,
+          "source_id": null,
+          "reason_code": "source_changed",
+          "message": "No retained Python review inspection ran because source snapshotting failed."
+        }
+      ]
+    },
+    {
+      "rule_id": "python.entry-point-input",
+      "status": "error",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": [
+        {
+          "member_id": null,
+          "source_id": null,
+          "reason_code": "source_changed",
+          "message": "No retained Python review inspection ran because source snapshotting failed."
+        }
+      ]
+    },
+    {
+      "rule_id": "python.gfile-bucket-authority",
+      "status": "error",
+      "evidence": [],
+      "observations": [],
+      "skipped_inputs": [],
+      "failed_inputs": [
+        {
+          "member_id": null,
+          "source_id": null,
+          "reason_code": "source_changed",
+          "message": "No retained Python review inspection ran because source snapshotting failed."
         }
       ]
     }

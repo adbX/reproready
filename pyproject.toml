@@ -1,7 +1,7 @@
 [project]
 name = "reproready"
-version = "0.1.0"
-description = "Static reproduction-readiness scoring for code artifacts — how well an archive equips a researcher to reproduce results, judged without running any code."
+version = "0.2.0"
+description = "Static inspection and reproduction-readiness scoring for code artifacts, without running artifact code."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
