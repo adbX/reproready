@@ -1,42 +1,30 @@
 # Checker ruleset `python-v1`
 
-The released [`check_path()` and `reproready check` interfaces](checker.md) use the `python-v1` ruleset to report bounded static observations about one regular file. The ruleset does not execute artifact code, grade compliance, predict whether code will run, or establish that results are correct. Its eleven rules are emitted once each and in this order:
+The `python-v1` ruleset defines eleven checks for the [ReproReady checker](checker.md). Each report includes one result per rule, in the order of the rule sections below. Observations describe files, not whether code runs, results reproduce, or an artifact meets a policy.
 
-1. `archive.structure`
-2. `python.absolute-path`
-3. `python.dependencies`
-4. `python.sys-path-three-dot`
-5. `python.download-comment-http-url`
-6. `python.open-bundled-archive-member`
-7. `python.pandas-csv-inventory-absence`
-8. `python.notebook-pip-install`
-9. `python.gdown-anonymized-value`
-10. `python.entry-point-input`
-11. `python.gfile-bucket-authority`
-
-The ruleset version identifies the rule catalogue and semantics. The separate report `schema_version` identifies the JSON shape. Adding a rule or changing a selector requires a new ruleset version; adding or changing a report field requires a new schema version.
+The ruleset version identifies the rules and their matching conditions; `schema_version` identifies the JSON format. Adding a rule or changing a matching condition requires a new ruleset version. Adding or changing a report field requires a new schema version.
 
 ## Shared coverage semantics
 
-Every rule result has one status:
+Each rule has one coverage status. Coverage describes what was inspected, not whether the artifact passes.
 
 | Status | Meaning |
 |---|---|
-| `complete` | Every applicable input within the documented support boundary was inspected. Findings may still exist. |
-| `partial` | At least one applicable input exists, but an applicable input was skipped, failed, or reached a limit. Successfully inspected inputs are not required. |
-| `unsupported` | The top-level regular file cannot receive this rule under the v1 support contract. |
-| `error` | A technical failure prevented a usable rule result. |
-| `not_applicable` | Inspection completed, but no input to which the rule applies was present. |
+| `complete` | Every applicable supported input was inspected; none was skipped or failed. Findings may still exist. |
+| `partial` | At least one applicable input was skipped, failed, or reached a limit. No successful inspection is required. |
+| `unsupported` | The top-level regular file is unsupported for this rule. It is recorded as skipped, with no evidence or observations. |
+| `error` | A technical failure prevented a usable result; at least one input is recorded as failed. |
+| `not_applicable` | Inspection completed with no applicable input, evidence, observations, skipped inputs, or failed inputs. |
 
-`no finding in the checks run` is derived only from `complete` and an empty `observations` list. It is not a stored observation or a pass result. An observation is either a factual `finding` or a `needs_human_review` item. Neutral facts such as imports and dependency declarations are stored as evidence instead of being mislabeled as findings.
+`no finding in the checks run` means `complete` with an empty `observations` list. It is neither a stored observation nor a pass. A `finding` records a static fact; `needs_human_review` asks for interpretation. Neutral facts, such as imports and dependency declarations, are evidence rather than findings.
 
-Skipped and failed inputs remain attached to each affected rule. A supported source that fails to decode or parse prevents that rule from reporting complete coverage. Unsupported source-like content remains in the member inventory or source index even when it does not affect an unrelated Python rule.
+Skipped and failed inputs stay attached to each affected rule. Decode or parse failures in supported sources prevent complete coverage. Unsupported source-like content remains in the inventory or source index without necessarily affecting unrelated Python rules.
 
-The JSON Schema enforces field shape, the eleven rule positions, and status relationships that are expressible in JSON Schema. The report producer also enforces unique dense IDs, no dangling member, source, or evidence references, matching parent and observation rule IDs, and no duplicate discovered rule IDs. `complete` has no skipped or failed inputs; `partial` has at least one; `unsupported` has a skipped top-level input and no evidence or observations; `error` has at least one failed input; and `not_applicable` has no evidence, observations, skipped inputs, or failed inputs.
+The JSON Schema enforces field types, rule positions, and the status constraints it can represent. The producer also enforces unique consecutive IDs, valid member/source/evidence references, matching parent and observation rule IDs, and no duplicate discovered rule IDs.
 
 ## Input classification
 
-An incomplete snapshot has detected kind `unclassified`; no content or extension classification is asserted. After a safe snapshot is complete, classification uses the case-insensitive display basename. The first matching row wins:
+Incomplete snapshots remain `unclassified`. Complete snapshots use the case-insensitive display basename; the first matching row wins:
 
 | Precedence | Condition | Detected kind |
 |---:|---|---|
@@ -51,22 +39,22 @@ An incomplete snapshot has detected kind `unclassified`; no content or extension
 | 9 | `zipfile.is_zipfile()` accepts the snapshot | `zip` |
 | 10 | Any other regular file | `unsupported_regular` |
 
-This precedence prevents a ZIP payload named as supported source from being expanded and prevents a DOCX container from being treated as a nested ZIP. Inside a ZIP, the same case-insensitive extension checks identify semantic source forms and formats that must remain inventory-only. A nested member is opened as ZIP only when its basename ends in `.zip` and the standard-library reader accepts it.
+Source suffixes take precedence over ZIP detection, and DOCX containers are not treated as ZIPs. The same extension checks classify sources and inventory-only formats inside ZIPs. A nested member is opened as ZIP only if its basename ends in `.zip` and the standard-library reader accepts it.
 
 ## Member and source identity
 
-Identifiers are deterministic opaque ordinals, not paths:
+IDs are deterministic ordinals, not paths:
 
-- `container:0` is the outer ZIP. Each successfully opened nested ZIP receives the next container ID in physical discovery order.
-- Every ZIP entry surfaced by the standard-library reader receives the next global `member:N` ID in physical central-directory order. Entries in a nested ZIP follow the member that contains that ZIP.
-- `parent_member_id` is `null` for outer entries and points to the containing ZIP member for nested entries.
-- Direct-file sources use `member_id: null`; the report's artifact identity locates the input.
-- Duplicate ordinals are one-based among entries with the same decoded name in the same container.
-- Python files, notebook documents and cells, requirements files, and `pyproject.toml` inputs receive global `source:N` IDs in member and then cell order.
+- `container:0` is the outer ZIP. Successfully opened nested ZIPs receive successive IDs in physical discovery order.
+- Every entry returned by the standard-library reader receives a global `member:N` ID in physical central-directory order. Nested entries follow their containing ZIP member.
+- `parent_member_id` is `null` for outer entries; nested entries point to their containing ZIP member.
+- Direct sources use `member_id: null`; the report's artifact identity locates the input.
+- Duplicate ordinals start at one for each decoded name within a container.
+- Python files, notebook documents and cells, requirements files, and `pyproject.toml` inputs receive global `source:N` IDs in member, then cell order.
 
-Reports preserve each surfaced member's decoded name. If the standard-library reader cannot decode or finish the central directory, the report records an archive-level issue and whatever prefix the reader surfaced safely; it does not parse raw central-directory bytes to manufacture a member record. Reports do not extract archive entries or use artifact names as host paths.
+Reports preserve decoded member names. If the reader cannot decode or finish the central directory, the report records an archive-level issue and any safely returned prefix. It does not construct records from raw central-directory bytes, extract entries, or use artifact names as host paths.
 
-The artifact display name is the final basename only. Fixed issue and coverage messages never interpolate source paths, temporary paths, raw exceptions, or artifact text. Artifact text appears only in the bounded `display_name`, member `name`, evidence `value`, and observation `snippet` fields.
+The artifact display name is its basename. Fixed issue and coverage messages exclude source paths, temporary paths, raw exceptions, and artifact text. Artifact text appears only in the bounded `display_name`, member `name`, evidence `value`, and observation `snippet` fields.
 
 Lists have these deterministic orders:
 
@@ -77,11 +65,11 @@ Lists have these deterministic orders:
 - Within a rule, evidence and observations sort by numeric source ID, numeric member ID, cell, line, condition or evidence kind, and value. `null` locations sort first.
 - Skipped and failed inputs sort by numeric source ID, numeric member ID, reason code, and message template.
 
-JSON object fields follow schema declaration order. Serialization uses compact UTF-8 JSON for limit accounting and rejects non-finite numbers; presentation mode may add indentation without changing list order.
+JSON fields follow schema declaration order. Limit accounting uses compact UTF-8 JSON and rejects non-finite numbers. Indentation may change; list order does not.
 
 ## Fixed limits
 
-The checker has no user-adjustable resource profile in v1. Every report repeats these values and names every reached resource limit:
+Limits are fixed in v1. Every report includes their values and identifies those reached:
 
 | Limit | Value |
 |---|---:|
@@ -100,17 +88,21 @@ The checker has no user-adjustable resource profile in v1. Every report repeats 
 | Encoded JSON report | 64 MiB |
 | Observation snippet display bound | 240 Unicode code points |
 
-The outer ZIP is depth 0. A ZIP member opened from it is depth 1. A member beyond depth 3 is inventoried but not opened. Expanded-byte accounting uses bytes actually read after decompression. Parser limits are checked before decoding or parsing the complete body. The member, source, evidence, observation, skipped-input, and failed-input arrays retain deterministic prefixes when a resource limit stops inspection.
+The outer ZIP is depth 0; its nested ZIPs are depth 1. Members beyond depth 3 are inventoried but not opened. Expansion counts actual decompressed bytes read. Parser limits apply before decoding or parsing a complete body. On reaching a resource limit, member, source, evidence, observation, skipped-input, and failed-input arrays retain deterministic prefixes.
 
-The snippet display bound is not a coverage or resource limit. A longer available snippet is cut to 240 Unicode code points and sets `snippet_truncated: true`; the source can still have `complete` rule coverage. `max_snippet_codepoints` appears in `effective` but never in `reached`.
+Snippet truncation does not reduce coverage: text beyond 240 Unicode code points is cut and sets `snippet_truncated: true`. `max_snippet_codepoints` appears in `effective`, never `reached`.
 
-The checker reserves one observation slot and 64 KiB of encoded report space for reached-limit state and closing JSON structure. It stops ordinary observations at 9,999 and emits `resource_limit_reached` under the affected rule as the 10,000th. Before appending any other source, issue, evidence, observation, skipped-input, or failed-input record, it measures the compact UTF-8 encoding with the reserved closing structure; if that append would cross 64 MiB, it omits the record, marks `max_report_bytes` reached, emits `resource_limit_reached` under the affected rule, and stops inspection. The resulting report identifies the first omitted member or source when known. Reaching a limit makes affected coverage partial unless no usable rule result can be produced, in which case the parent emits a small technical error report when possible.
+The checker reserves one observation slot and 64 KiB of report space for limit reporting and closing JSON. After 9,999 ordinary observations, the 10,000th is `resource_limit_reached` under the affected rule.
+
+Before adding any source, issue, evidence, observation, skipped-input, or failed-input record, the checker measures compact UTF-8 size including the closing reserve. An append exceeding 64 MiB is omitted: inspection stops, `max_report_bytes` is marked reached, and the affected rule emits `resource_limit_reached`. The report identifies the first omitted member or source when known.
+
+Reached limits make affected coverage partial. If no usable rule result is possible, the parent instead emits a small technical error report when possible.
 
 ## `archive.structure`
 
-This rule applies only to ZIP and ZIP64 inputs. Direct supported files return `not_applicable`; unsupported regular files return `unsupported`.
+Checks ZIP and ZIP64 inputs. Supported direct files return `not_applicable`; unsupported regular files return `unsupported`.
 
-The rule emits exact structural observations for:
+Structural observations use these condition codes:
 
 | Condition code | Exact condition |
 |---|---|
@@ -126,11 +118,11 @@ The rule emits exact structural observations for:
 | `central_directory_error` | The standard-library reader cannot decode or complete the ZIP central directory. This archive-level observation has no member ID. |
 | `resource_limit_reached` | A fixed member, nesting, expansion, memory, storage, time, observation, or report limit prevents complete inspection. |
 
-Every reached archive limit emits `resource_limit_reached` in addition to the specific inventory issue. The Python rules use the same condition code when their own inspection becomes incomplete because of a limit. These observations describe ZIP metadata and reads only. They do not claim that extraction occurred or that a name behaves identically on every filesystem. Directory entries are identified by the standard-library ZIP directory predicate. Other unsupported member formats remain inventoried but are not recursively parsed.
+Each reached archive limit emits `resource_limit_reached` alongside its inventory issue. Python rules use the same code for limits affecting their inspection. These observations describe metadata and reads, not extraction or filesystem behavior. Directories follow the standard-library ZIP predicate. Other unsupported member formats are inventoried, not recursively parsed.
 
 ## `python.absolute-path`
 
-This rule applies to Python files and supported notebook code cells that parse successfully with the running interpreter's `ast` module. It inspects only `ast.Constant` string values used in the call positions below. The callee match is lexical: it describes the spelling in the syntax tree and does not claim that a name was not rebound.
+Checks Python files and supported notebook cells parsed by the running interpreter's `ast` module. Only `ast.Constant` strings in these call positions are inspected. Callees match by spelling, even if a name was rebound:
 
 | Callee spelling | Supported argument positions |
 |---|---|
@@ -142,7 +134,7 @@ This rule applies to Python files and supported notebook code cells that parse s
 | `os.path.exists`, `os.path.isfile`, `os.path.isdir`, `os.path.getsize` | positional 0 or keyword `path` |
 | `Path`, `PurePath`, `PosixPath`, `PurePosixPath`, `WindowsPath`, `PureWindowsPath` and the same names qualified by `pathlib` | positional 0 |
 
-A decoded literal receives one of these syntax classes, checked in the listed order:
+Decoded literals receive the first matching syntax class:
 
 1. `windows_device_path`: starts with `\\?\` or `\\.\`.
 2. `windows_unc_path`: starts with two slashes or two backslashes followed by a non-separator.
@@ -150,87 +142,95 @@ A decoded literal receives one of these syntax classes, checked in the listed or
 4. `posix_absolute_path`: starts with `/`.
 5. `tilde_path`: is exactly `~`, starts with `~/` or `~\`, or starts with `~name/` or `~name\` for a nonempty name.
 
-The observation contains the source member, one-based notebook cell when applicable, one-based source line, source syntax snippet, and decoded syntax class. The rule does not perform constant propagation, inspect strings outside the listed call positions, resolve aliases, determine reachability, or interpret paths with the host operating system.
+Observations include the source member, one-based notebook cell when applicable, one-based line, syntax snippet, and decoded syntax class. The rule does not propagate constants, inspect other call positions, resolve aliases, determine reachability, or interpret paths using the host OS.
 
-Notebook support is limited to nbformat 4 documents whose code-cell `source` is a string or a list of strings. The checker parses code-cell source only. Malformed JSON, unsupported notebook versions, conflicting or non-Python language metadata, magics, shell escapes, and mixed-language cells remain explicit partial or unsupported source records.
+Supported notebooks use nbformat 4 with code-cell `source` as a string or list of strings. Only code-cell source is parsed. Malformed JSON, other notebook versions, conflicting or non-Python language metadata, magics, shell escapes, and mixed-language cells remain explicit partial or unsupported source records.
 
 ## `python.dependencies`
 
-This rule records four evidence classes separately:
+Records four evidence classes:
 
-1. Imports from successfully parsed `ast.Import` and absolute `ast.ImportFrom` nodes. `import a.b` and `from a.b import c` produce the top-level name `a`. Relative imports are local-module evidence.
-2. Direct declarations from case-insensitive basenames matching `requirements*.txt`.
-3. Direct declaration strings from the PEP 621 `project.dependencies` array in `pyproject.toml`.
-4. Running-runtime standard-library names and obvious local modules used to classify imports.
+1. Imports from parsed `ast.Import` and absolute `ast.ImportFrom` nodes. `import a.b` and `from a.b import c` yield `a`; relative imports are local-module evidence.
+2. Direct declarations from case-insensitive `requirements*.txt` basenames.
+3. Strings in the PEP 621 `project.dependencies` array in `pyproject.toml`.
+4. Standard-library names from the running interpreter and obvious local modules.
 
-A supported requirements line is one physical line containing a distribution name, optional extras, and optional version specifiers. Blank lines and comments are ignored. Includes, constraints, options, editable installs, local paths, URLs, VCS references, continuations, and environment markers remain visible but unsupported. For PEP 621, `project.dependencies` must be an array of strings. Optional dependency groups, tool-specific tables, direct URLs, and environment-marker semantics remain visible but unsupported.
+Supported requirements entries occupy one physical line: a distribution name, optional extras, and optional version specifiers. Blank lines and comments are ignored. Includes, constraints, options, editable installs, local paths, URLs, VCS references, continuations, and environment markers remain visible but unsupported.
 
-Distribution and import names are normalized by lowercasing and replacing each run of `-`, `_`, or `.` with `-`. Only identical normalized names are exact matches. The checker does not maintain an import-to-distribution map and does not inspect installed packages.
+PEP 621 `project.dependencies` must be an array of strings. Optional groups, tool-specific tables, direct URLs, and environment-marker semantics remain visible but unsupported.
 
-Matching never crosses a ZIP container or inferred project root. A supported dependency file defines a project root at its parent directory. A Python source belongs to the deepest dependency-file ancestor in the same container; if no such ancestor exists, it belongs to the container root after removing one directory component shared by every file. When several dependency files define the same root, their declarations are combined in member order. Imports and declarations in different nested ZIPs or different inferred roots remain separate evidence.
+Names are lowercased, with each run of `-`, `_`, or `.` replaced by `-`. Only identical normalized import and distribution names match. The checker neither maps imports to distributions nor inspects installed packages.
 
-An obvious local module is a matching `name.py` or `name/__init__.py` beneath the current inferred project root or its direct `src/` child. The search never crosses into another inferred project root or ZIP container. Other local-module layouts remain unclassified.
+Matching stays within a ZIP container and inferred project root. Each supported dependency file defines a root at its parent directory. Sources use the deepest dependency-file ancestor in their container. Without one, they use the container root after removing one directory component shared by every file. Declarations for the same root combine in member order.
 
-An import that is neither a running-runtime standard-library name, an obvious local module, nor an exact declaration match produces `needs_human_review`. A declaration without an exact import match also produces `needs_human_review`; it may be a valid tool, plugin, optional, or transitive dependency. These observations ask a person to interpret non-identical evidence and do not claim that a dependency is missing.
+An obvious local module matches `name.py` or `name/__init__.py` under that root or its direct `src/` child. Matching never crosses into another project root or ZIP container; other layouts remain unclassified.
 
-Poetry, PDM, Pipenv, Conda, lock files, Dockerfiles, constraints, requirement includes, namespace-package inference, optional groups, and `setup.py` remain unsupported in this ruleset. Their presence is retained in inventory and makes dependency coverage partial when the file is source-like for dependency review.
+An import outside the standard library without a local-module or exact declaration match produces `needs_human_review`. So does a declaration without an exact import match: it may describe a tool, plugin, optional, or transitive dependency. Neither observation establishes a missing dependency.
+
+Poetry, PDM, Pipenv, Conda, lock files, Dockerfiles, constraints, requirement includes, namespace-package inference, optional groups, and `setup.py` are unsupported. These files remain inventoried and make coverage partial when recognized as dependency-related inputs.
 
 ## `python.sys-path-three-dot`
 
-This rule applies only to successfully parsed `.py` files. It resolves unchanged direct bindings created by `from sys import path` or `from sys import path as alias`, then selects `alias.append(literal)` with one positional argument and no keywords. The decoded literal is split on `/` and `\`, and the rule emits `three_dot_path_segment` only when one segment is exactly `...`.
+Checks parsed `.py` files for unchanged bindings from `from sys import path` or `from sys import path as alias`. It selects `alias.append(literal)` with one positional argument and no keywords. Splitting the decoded literal on `/` and `\` must yield a segment exactly `...` to emit `three_dot_path_segment`.
 
-The selector excludes `..`, four dots, substrings, computed values, `import sys; sys.path.append(...)`, notebook code, and rebound aliases. Its review question is whether the exact three-dot segment is an intentional directory name or an artifact-specific path assumption. The checker does not inspect the filesystem, infer reachability, or decide that the path is invalid.
+Excludes `..`, four dots, substrings, computed values, `import sys; sys.path.append(...)`, notebooks, and rebound aliases. The question is whether `...` names an intentional directory or assumes an artifact-specific path. The checker does not inspect the filesystem, infer reachability, or declare the path invalid.
 
 ## `python.download-comment-http-url`
 
-This lexical rule applies to tokenizable `.py` files and supported Python notebook code cells. A standard-library `tokenize` `COMMENT` token emits `download_comment_with_http_url` when the same decoded physical line contains the case-insensitive whole word `download` and a URL whose parsed scheme is `http` or `https`. The bounded snippet is the complete physical comment line, while trailing sentence punctuation is excluded from URL recognition.
+Checks tokenizable `.py` files and supported notebook code cells. A `tokenize` `COMMENT` token emits `download_comment_with_http_url` if its decoded physical line contains both the case-insensitive whole word `download` and a URL with scheme `http` or `https`. URL recognition excludes trailing sentence punctuation; the bounded snippet covers the complete comment line.
 
-Strings, Markdown and raw cells, outputs, split-line instructions, non-HTTP locations, and comments missing either required element do not match. Tokenization is independent of AST parsing, so this result can be complete when another Python rule is partial. Its review question is whether the comment describes a manual acquisition step, an optional operation, or background information.
+Strings, Markdown/raw cells, outputs, split-line instructions, non-HTTP locations, and comments missing either element do not match. Tokenization is independent of AST parsing, so coverage can be complete while another Python rule is partial. The question is whether the comment describes manual acquisition, an optional operation, or background information.
 
 ## `python.open-bundled-archive-member`
 
-This rule applies to parsed `.py` files and supported Python notebook cells inside a ZIP inventory. It selects unshadowed builtin `open()` calls with a supported relative POSIX literal, or a simple name with one earlier unreassigned literal binding in the same module or ordered notebook namespace. Omitted mode is read mode. A literal mode must contain `r`, contain none of `w`, `a`, or `x`, and otherwise be a valid text, binary, or update-mode combination.
+Checks parsed `.py` files and supported notebook cells inside ZIPs. It selects unshadowed builtin `open()` calls whose path is a supported relative POSIX literal or a simple name bound earlier to an unreassigned literal in the same module or ordered notebook namespace.
 
-The source's own container must have no member at the normalized archive-root-relative path. Exactly one readable regular member at that path must exist in a descendant ZIP container. The observation `read_path_only_in_bundled_archive` relates to one `bundled_archive_member` evidence record. Zero, duplicate, unreadable, unrelated-container, wrapper-directory, dynamically computed, explicit archive-reader, and incomplete-inventory cases do not produce the observation.
+Omitted mode means read mode. A literal mode must contain `r`, exclude `w`, `a`, and `x`, and be a valid text, binary, or update-mode combination.
 
-The review question is whether the artifact's runtime makes the nested member available at the read path. The exact static relationship does not establish extraction, mounting, call reachability, or the effect of earlier calls.
+The normalized archive-root-relative path must be absent from the source's container and identify exactly one readable regular member in a descendant ZIP. `read_path_only_in_bundled_archive` links to one `bundled_archive_member` evidence record.
+
+Zero, duplicate, unreadable, unrelated-container, wrapper-directory, dynamically computed, explicit archive-reader, and incomplete-inventory cases do not match. The question is whether the runtime makes the nested member available at that path. The relationship does not establish extraction, mounting, call reachability, or earlier calls' effects.
 
 ## `python.pandas-csv-inventory-absence`
 
-This rule applies only to parsed `.py` members when the complete artifact inventory has no skipped discovery or listing limit. It resolves an unchanged `import pandas` binding and selects `alias.read_csv(path)` when the first positional argument is a supported relative POSIX literal or a name assigned exactly once earlier at module scope to such a literal.
+Checks parsed `.py` members only when the artifact inventory is complete, with no skipped discovery or listing limit. It selects `alias.read_csv(path)` through an unchanged `import pandas` binding. The first positional argument must be a supported relative POSIX literal or a name assigned to one exactly once earlier at module scope.
 
-The normalized literal is compared case-sensitively with archive-root-relative and source-parent-relative locations in the source's own container. The rule emits `pandas_csv_not_in_inventory` only when neither location is represented. Direct `.py` input, notebook cells, `from pandas import read_csv`, keyword-only operands, constructed paths, function parameters, URIs, other readers, and incomplete inventories do not produce the observation.
+The rule compares the normalized literal case-sensitively with archive-root-relative and source-parent-relative locations in the source's container. It emits `pandas_csv_not_in_inventory` only if neither location is represented.
 
-The review question is whether another documented step, mount, generation process, or runtime environment supplies the path. The checker does not search the host filesystem, cross ZIP containers, relate a similarly named file with another extension, or claim that runtime data is missing.
+Direct `.py` inputs, notebooks, `from pandas import read_csv`, keyword-only operands, constructed paths, function parameters, URIs, other readers, and incomplete inventories do not match.
+
+The question is whether a documented step, mount, generation process, or runtime supplies the path. The checker does not search the host filesystem, cross containers, match similarly named files with other extensions, or establish that runtime data is missing.
 
 ## `python.notebook-pip-install`
 
-This rule applies only to reconstructable code-cell source in supported nbformat 4 Python notebooks. It examines one-based logical source lines whose first non-whitespace character is `!`, then parses the remainder with standard-library `shlex` in POSIX mode. The first two literal tokens must be exactly `pip` and `install` to emit `notebook_pip_install`.
+Checks reconstructable code-cell source in supported nbformat 4 Python notebooks. One-based logical lines starting with `!` after whitespace are parsed with `shlex` in POSIX mode. The first two literal tokens must be `pip` and `install` to emit `notebook_pip_install`. The bounded snippet covers the complete logical line.
 
-The bounded snippet is the complete logical line. `%pip`, `python -m pip`, subprocess calls, comments, dynamically assembled commands, Markdown cells, `.py` files, and other package managers do not match. An unterminated shell quote or continuation produces `notebook_shell_parse_error` for this rule. The command is not treated as dependency evidence.
+`%pip`, `python -m pip`, subprocess calls, comments, computed commands, Markdown cells, `.py` files, and other package managers do not match. Unterminated shell quotes or continuations produce `notebook_shell_parse_error`. The command is not dependency evidence.
 
-The review question is whether the notebook command represents a required setup step, an optional convenience, or historical material. The checker does not run the command or interpret its operands as a complete environment declaration.
+The question is whether the command is required setup, optional convenience, or historical material. The checker neither runs it nor treats its operands as a complete environment declaration.
 
 ## `python.gdown-anonymized-value`
 
-This rule applies to parsed `.py` modules and supported Python notebook cells processed in document order. It requires a nonempty dictionary literal assigned to a simple module or notebook-global name, with explicit entries and every value exactly equal to the case-sensitive string `ANONYMIZED`. Dictionary unpacking, mixed values, mutation, rebinding, or an unavailable intervening notebook cell invalidates the relation.
+Checks parsed `.py` modules and supported notebook cells in document order. A nonempty dictionary literal must be assigned to a simple module or notebook-global name, with explicit entries whose values are all exactly `ANONYMIZED` (case-sensitive). Unpacking, mixed values, mutation, rebinding, or an unavailable intervening cell invalidates the relation.
 
-An unchanged direct `import gdown` binding must call `.download()` with a first positional argument that receives a qualifying dictionary subscript directly, inside an f-string, or inside string concatenation. One intervening simple-name assignment is supported in the same straight-line lexical scope. The rule does not propagate across branches or loops, follow helpers, aliases, returns, files, environment values, or more than one assignment edge.
+An unchanged direct `import gdown` binding must call `.download()` with a qualifying dictionary subscript in its first positional argument, directly, in an f-string, or in string concatenation. One intervening simple-name assignment in the same straight-line lexical scope is supported. Propagation does not cross branches or loops, follow helpers, aliases, returns, files, or environment values, or exceed one assignment edge.
 
-Each `anonymized_download_identifier` observation relates to `anonymized_mapping_value` evidence at the first value literal. Evidence is reused for repeated calls through the same unchanged mapping. The review question is whether anonymization is intentional or whether another release step supplies a concrete identifier. The checker does not claim that the call executes or that the value prevents a download.
+`anonymized_download_identifier` links to `anonymized_mapping_value` evidence at the first value literal, reused for calls through the same unchanged mapping. The question is whether anonymization is intentional or another release step supplies an identifier, not whether the call executes or a download fails.
 
 ## `python.entry-point-input`
 
-This rule applies to parsed `.py` files and supported Python notebook cells. It selects an unshadowed builtin `input()` call inside the executable statement subtree of a module-level `if __name__ == \"__main__\":` guard. It descends through expressions and control statements, but not into nested function, class, or lambda bodies merely because their definitions appear in the guard.
+Checks parsed `.py` files and supported notebook cells for an unshadowed builtin `input()` call within a module-level `if __name__ == "__main__":` guard. Matching descends through expressions and control statements, not nested function, class, or lambda bodies defined in the guard.
 
-Reversed comparisons, membership tests, nonliteral sentinels, functions called by the guard, `sys.stdin`, and contexts that lexically bind `input` do not match. An unavailable intervening notebook cell invalidates prior carry state. The `entry_point_stdin` observation is located at the call.
+Reversed comparisons, membership tests, nonliteral sentinels, functions called by the guard, `sys.stdin`, and contexts that lexically bind `input` do not match. An unavailable intervening notebook cell invalidates prior tracked bindings. `entry_point_stdin` locates the call.
 
-The review question is how stdin is supplied for this entry point. Redirected or piped input is a valid interpretation, so the checker does not claim that a person must type a value.
+The question is how stdin is supplied. Redirected or piped input is valid; the observation does not imply a person must type a value.
 
 ## `python.gfile-bucket-authority`
 
-This rule applies only to parsed `.py` files. It resolves unchanged direct imports from `tensorflow.io.gfile`, qualified `tensorflow.io.gfile.GFile` references, and their direct aliases. It also resolves direct `os.path.join`, `os` aliases, `from os import path` aliases, and `from os.path import join` aliases.
+Checks parsed `.py` files using unchanged direct imports from `tensorflow.io.gfile`, qualified `tensorflow.io.gfile.GFile` references, or their direct aliases. Supported joins include direct `os.path.join`, `os` aliases, `from os import path` aliases, and `from os.path import join` aliases.
 
-The first positional `GFile` argument must be a decoded literal or a supported join expression whose first component is a decoded literal. Lexical URI parsing must find scheme `gs` and the case-sensitive authority exactly `bucket` to emit `bucket_authority_literal`. Another authority, credentials, a port, uppercase or suffixed authority, another scheme, keyword-only file operands, formatting, concatenation, reassignment, wrappers, dynamically assembled paths, and notebooks do not match.
+The first positional `GFile` argument must be a decoded literal or supported join expression starting with one. URI parsing must find scheme `gs` and authority exactly `bucket` (case-sensitive) to emit `bucket_authority_literal`.
 
-The review question is whether `bucket` names a real Google Cloud Storage bucket or an artifact-specific value that needs interpretation. The authority is legal, so the checker does not label it a placeholder or test network access.
+Other authorities, credentials, ports, uppercase or suffixed authorities, other schemes, keyword-only operands, formatting, concatenation, reassignment, wrappers, computed paths, and notebooks do not match.
+
+The question is whether `bucket` names a real Google Cloud Storage bucket or needs artifact-specific interpretation. It is a legal authority, not necessarily a placeholder. No network check occurs.
