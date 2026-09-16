@@ -20,10 +20,12 @@ Pass one ZIP archive or a [supported Python, notebook, or dependency file](docs/
 
 ```sh
 reproready check artifact.zip
-reproready check artifact.zip --json
+reproready check artifact.zip --json > report.json
+reproready view report.json
+reproready view report.json --all
 ```
 
-The terminal report groups findings and questions for review and flags incomplete inspection. Add `--json` for machine-readable output.
+The terminal report separates analyzed content, incomplete checks, findings, and items needing review. `check --json` writes one compact saved report. `view` validates and displays that report without reopening the artifact; `--all` expands every retained location and useful linked evidence.
 
 ## Documentation
 

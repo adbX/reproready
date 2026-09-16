@@ -88,39 +88,39 @@ _BIDI_CODEPOINTS = {
 _LIMIT_ISSUES = {
     "max_member_count": (
         "member_count_limit",
-        "The fixed member-count limit prevented complete inventory.",
+        "The archive contains more entries than the checker can inspect.",
     ),
     "max_nested_zip_depth": (
         "nested_zip_depth_limit",
-        "At least one nested ZIP was inventoried but not opened beyond depth 3.",
+        "At least one nested ZIP was inventoried but not opened because it exceeds depth 3.",
     ),
     "max_expanded_bytes_per_member": (
         "expanded_member_limit",
-        "A member exceeded the fixed expanded-byte limit.",
+        "An expanded archive entry exceeded the per-entry size limit.",
     ),
     "max_expanded_bytes_total": (
         "expanded_total_limit",
-        "The fixed artifact-wide expanded-byte limit was reached.",
+        "The total expanded archive data exceeded the inspection limit.",
     ),
     "max_python_source_bytes": (
         "python_source_limit",
-        "A Python source exceeded the fixed parser-input limit.",
+        "A Python source exceeded the size limit for analysis.",
     ),
     "max_notebook_bytes": (
         "notebook_limit",
-        "A notebook exceeded the fixed parser-input limit.",
+        "A notebook exceeded the size limit for analysis.",
     ),
     "max_dependency_file_bytes": (
         "dependency_file_limit",
-        "A dependency file exceeded the fixed parser-input limit.",
+        "A dependency file exceeded the size limit for analysis.",
     ),
     "max_temporary_bytes": (
         "temporary_storage_limit",
-        "The fixed checker-owned temporary-storage limit was reached.",
+        "The checker exhausted its bounded temporary storage.",
     ),
     "max_report_bytes": (
         "report_size_limit",
-        "The fixed encoded-report limit prevented complete inventory.",
+        "The JSON report exceeded its size limit.",
     ),
 }
 _SOURCE_READ_BLOCKERS = (
@@ -577,7 +577,7 @@ class InspectionEngine:
         if len(encode_report(report)) > FIXED_LIMITS["max_report_bytes"]:
             raise InventoryError(
                 "max_report_bytes",
-                "The bounded inventory could not fit in the fixed report limit.",
+                "The inventory could not fit within the JSON report size limit.",
             )
         return report
 

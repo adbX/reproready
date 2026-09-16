@@ -78,10 +78,9 @@ def test_documented_terminal_example_exposes_groups_counts_and_json_route() -> N
 
     assert result.returncode == 0
     assert result.stderr == ""
-    assert "1 finding" in result.stdout
-    assert "2 human-review observations" in result.stdout
-    assert "2 human-review topics" in result.stdout
-    assert "POSIX absolute path literals" in result.stdout
-    assert "Three-dot sys.path segments" in result.stdout
-    assert "Download comments containing HTTP URLs" in result.stdout
-    assert "check PATH --json" in result.stdout
+    assert "1 artifact finding" in result.stdout
+    assert "2 review items in 2 categories" in result.stdout
+    assert "POSIX absolute paths" in result.stdout
+    assert "Python search paths" in result.stdout
+    assert "Download comments" in result.stdout
+    assert "Content analyzed" in result.stdout

@@ -400,8 +400,8 @@ def test_snippet_bound_and_terminal_escaping_preserve_complete_coverage(
         name="hostile.py",
     )
     output = _render(hostile_report)
-    assert "POSIX absolute path literals" in output
-    assert "hostile.py · line 1" in output
+    assert "POSIX absolute paths" in output
+    assert "hostile.py / line 1" in output
     assert "[bold]unsafe[/bold]\\u0007\\u202e" in output
     assert "\u0007" not in output
     assert "\u202e" not in output

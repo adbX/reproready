@@ -293,7 +293,7 @@ def collect_import_candidates(
                 yield _unsupported(
                     location,
                     "dependency_evidence_value_limit",
-                    "An import name exceeded the fixed evidence-value bound.",
+                    "An import name was too long to retain in the report.",
                 )
                 continue
             yield ImportCandidate(
@@ -351,7 +351,7 @@ def _declaration_event(
             unsupported=_unsupported(
                 location,
                 "unsupported_dependency_syntax",
-                "A dependency declaration exceeded the fixed evidence-value bound.",
+                "A dependency declaration was too long to retain in the report.",
             )
         )
     if _obvious_unsupported_requirement(value):

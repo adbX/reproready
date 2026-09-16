@@ -38,19 +38,19 @@ _ARCHIVE_LIMITS = (
 _LIMIT_REASONS = {
     "max_member_count": (
         "member_count_limit",
-        "The fixed member-count limit prevented complete archive inspection.",
+        "The archive contains more entries than the checker can inspect.",
     ),
     "max_nested_zip_depth": (
         "nested_zip_depth_limit",
-        "The nested ZIP was not opened beyond depth 3.",
+        "The nested ZIP was inventoried but not opened because it exceeds depth 3.",
     ),
     "max_expanded_bytes_per_member": (
         "expanded_member_limit",
-        "The member exceeded the fixed expanded-byte limit.",
+        "The expanded archive entry exceeded the per-entry size limit.",
     ),
     "max_expanded_bytes_total": (
         "expanded_total_limit",
-        "The fixed artifact-wide expanded-byte limit prevented inspection.",
+        "The total expanded archive data exceeded the inspection limit.",
     ),
     "max_worker_rss_bytes": (
         "worker_memory_limit",
@@ -58,7 +58,7 @@ _LIMIT_REASONS = {
     ),
     "max_temporary_bytes": (
         "temporary_storage_limit",
-        "The fixed checker-owned storage limit prevented inspection.",
+        "The checker exhausted its bounded temporary storage.",
     ),
     "max_elapsed_seconds": (
         "worker_timeout",
@@ -66,11 +66,11 @@ _LIMIT_REASONS = {
     ),
     "max_observations": (
         "observation_limit",
-        "The fixed observation limit prevented complete reporting.",
+        "The report reached the maximum number of retained observations.",
     ),
     "max_report_bytes": (
         "report_size_limit",
-        "The fixed encoded-report limit prevented complete reporting.",
+        "The JSON report exceeded its size limit.",
     ),
 }
 _COVERAGE_MESSAGES = {

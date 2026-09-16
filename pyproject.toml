@@ -22,6 +22,7 @@ classifiers = [
 # Checker-only dependencies stay outside the score pipeline.
 dependencies = [
     "packaging>=24.0",
+    "jsonschema>=4.23",
     "rich>=13.0",
     "tomli>=2.0; python_version < '3.11'",
 ]

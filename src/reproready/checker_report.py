@@ -56,11 +56,11 @@ _REPORT_RESERVE_BYTES = 64 * 1024
 _TERMINAL_LIMIT_ISSUES = {
     "max_observations": (
         "observation_limit",
-        "The fixed observation limit prevented complete reporting.",
+        "The report reached the maximum number of retained observations.",
     ),
     "max_report_bytes": (
         "report_size_limit",
-        "The fixed encoded-report limit prevented complete reporting.",
+        "The JSON report exceeded its size limit.",
     ),
 }
 
@@ -447,12 +447,10 @@ def absolute_path_result(
             continue
         if source["status"] in {"skipped", "unsupported"}:
             field = "skipped_inputs"
-            message = (
-                "This applicable Python input was skipped during source inspection."
-            )
+            message = "This Python source or notebook cell was not analyzed."
         else:
             field = "failed_inputs"
-            message = "This applicable Python input failed during source inspection."
+            message = "This Python source or notebook cell could not be analyzed."
         coverage_candidates.append(
             (
                 field,
@@ -544,9 +542,9 @@ def _dependency_source_coverage(
     if status in {"skipped", "unsupported"}:
         field = "skipped_inputs"
         if form == "unsupported_source":
-            message = "This dependency-file form is indexed but unsupported."
+            message = "This dependency file uses a format the checker does not parse."
         else:
-            message = "This applicable dependency input was skipped during inspection."
+            message = "This dependency source was not analyzed."
     else:
         field = "failed_inputs"
         if form in {"python_file", "notebook_code_cell", "notebook_document"}:
@@ -1156,6 +1154,7 @@ def _assert_report_references(
     rule_results: Sequence[Mapping[str, object]],
     source_index: Sequence[Mapping[str, object]],
     members: Sequence[Mapping[str, object]],
+    issues: Sequence[Mapping[str, object]],
 ) -> None:
     evidence = [item for result in rule_results for item in result["evidence"]]
     observations = [item for result in rule_results for item in result["observations"]]
@@ -1167,8 +1166,41 @@ def _assert_report_references(
         f"observation:{index}" for index in range(len(observation_ids))
     ]:
         raise RuntimeError("checker observation IDs must be dense and ordered")
-    admitted_sources = {str(source["source_id"]) for source in source_index}
-    admitted_members = {str(member["member_id"]) for member in members}
+
+    source_ids = [str(source["source_id"]) for source in source_index]
+    member_ids = [str(member["member_id"]) for member in members]
+    if len(source_ids) != len(set(source_ids)):
+        raise RuntimeError("checker source IDs must be unique")
+    if len(member_ids) != len(set(member_ids)):
+        raise RuntimeError("checker member IDs must be unique")
+    admitted_sources = set(source_ids)
+    admitted_members = set(member_ids)
+
+    for issue in issues:
+        if (
+            issue["member_id"] is not None
+            and issue["member_id"] not in admitted_members
+        ):
+            raise RuntimeError("checker inventory issue references an omitted member")
+    for member in members:
+        if (
+            member["parent_member_id"] is not None
+            and member["parent_member_id"] not in admitted_members
+        ):
+            raise RuntimeError("checker member references an omitted parent")
+        for issue in member["issues"]:
+            if (
+                issue["member_id"] is not None
+                and issue["member_id"] not in admitted_members
+            ):
+                raise RuntimeError("checker member issue references an omitted member")
+    for source in source_index:
+        if (
+            source["member_id"] is not None
+            and source["member_id"] not in admitted_members
+        ):
+            raise RuntimeError("checker source references an omitted member")
+
     for result in rule_results:
         result_evidence = {str(item["evidence_id"]) for item in result["evidence"]}
         for item in result["evidence"]:
@@ -1353,7 +1385,7 @@ def successful_intake_report(
             sort_archive_result(archive_result)
     issues.sort(key=_issue_key)
     _assign_observation_ids(rule_results)
-    _assert_report_references(rule_results, source_index, members)
+    _assert_report_references(rule_results, source_index, members, issues)
     limit_order = {name: index for index, name in enumerate(FIXED_LIMITS)}
     reached_limits.sort(key=limit_order.__getitem__)
     return {
@@ -1391,17 +1423,17 @@ def incomplete_snapshot_report(
 
     reached = [reached_limit] if reached_limit is not None else []
     failed_messages = (
-        "No archive inspection ran because source snapshotting failed.",
-        "No Python inspection ran because source snapshotting failed.",
-        "No dependency inspection ran because source snapshotting failed.",
-        "No three-dot sys.path inspection ran because source snapshotting failed.",
-        "No download-comment inspection ran because source snapshotting failed.",
-        "No bundled-archive read inspection ran because source snapshotting failed.",
-        "No pandas CSV inventory inspection ran because source snapshotting failed.",
-        "No notebook pip inspection ran because source snapshotting failed.",
-        "No anonymized gdown inspection ran because source snapshotting failed.",
-        "No entry-point input inspection ran because source snapshotting failed.",
-        "No GFile authority inspection ran because source snapshotting failed.",
+        "Archive contents were not analyzed because the input copy failed.",
+        "Python paths were not analyzed because the input copy failed.",
+        "Dependencies were not analyzed because the input copy failed.",
+        "Python search paths were not analyzed because the input copy failed.",
+        "Download comments were not analyzed because the input copy failed.",
+        "Reads from bundled archives were not analyzed because the input copy failed.",
+        "CSV references were not analyzed because the input copy failed.",
+        "Notebook setup commands were not analyzed because the input copy failed.",
+        "Download identifiers were not analyzed because the input copy failed.",
+        "User input calls were not analyzed because the input copy failed.",
+        "Cloud-storage paths were not analyzed because the input copy failed.",
     )
     return {
         "schema_version": SCHEMA_VERSION,
@@ -1447,7 +1479,7 @@ def worker_failure_report(
         "worker_memory_monitor_error": "The inspection worker memory monitor failed.",
         "worker_memory_limit": "The inspection worker reached its resident-memory limit.",
         "worker_timeout": "The inspection worker reached its elapsed-time limit.",
-        "worker_report_limit": "The inspection worker reached its report-byte limit.",
+        "worker_report_limit": "The inspection worker reached the JSON report size limit.",
         "worker_result_error": "The inspection worker did not produce a usable report.",
         "worker_error": "The inspection worker stopped before producing a usable report.",
     }

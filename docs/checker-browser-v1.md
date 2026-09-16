@@ -42,7 +42,7 @@ Cursors are opaque ASCII strings of at most 256 characters, bound to the artifac
 
 ### Limits and text
 
-These fixed limits supplement the shared checker limits:
+These fixed limits are added to the shared checker limits:
 
 | Identifier | Kind | Value |
 |---|---|---:|

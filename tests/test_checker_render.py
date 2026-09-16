@@ -1,10 +1,10 @@
-"""Terminal contracts for the topic-first checker report."""
+"""Terminal contracts for the compact checker report."""
 
 from __future__ import annotations
 
 import copy
 import zipfile
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 
 from rich.console import Console
@@ -12,8 +12,26 @@ from rich.console import Console
 from reproready.checker import _check_document
 from reproready.checker_render import render_report, report_console
 
+REVIEW_TITLES = (
+    "Dependencies",
+    "Python search paths",
+    "Download comments",
+    "Files inside archives",
+    "CSV files",
+    "Notebook setup",
+    "Download identifiers",
+    "User input",
+    "Cloud storage",
+)
 
-def _render(report: dict[str, object], *, width: int = 100) -> str:
+
+def _render(
+    report: dict[str, object],
+    *,
+    width: int = 100,
+    report_path: Path | None = None,
+    show_all: bool = False,
+) -> str:
     output = StringIO()
     console = Console(
         file=output,
@@ -22,11 +40,16 @@ def _render(report: dict[str, object], *, width: int = 100) -> str:
         no_color=True,
         width=width,
     )
-    render_report(report, console)
+    render_report(
+        report,
+        console,
+        report_path=report_path,
+        show_all=show_all,
+    )
     return output.getvalue()
 
 
-def test_evidence_heavy_report_leads_with_topics_and_bounds_examples(
+def test_evidence_heavy_report_groups_names_and_bounds_compact_detail(
     checker_inputs,
 ) -> None:
     report = _check_document(checker_inputs.paths["evidence_heavy_zip"])
@@ -39,57 +62,48 @@ def test_evidence_heavy_report_leads_with_topics_and_bounds_examples(
 
     assert len(dependencies["observations"]) == 36
     assert len(dependencies["evidence"]) > 43
-    assert "evidence-heavy.zip" in output
-    assert "0 findings" in output
-    assert "36 human-review observations" in output
-    assert "1 human-review topic" in output
-    assert "11 rules total: 10 complete · 1 not applicable" in output
-    assert "Dependency declarations without exact imports" in output
-    assert "project/requirements.txt" in output
-    assert "line 8" in output
+    assert output.index("Content analyzed") < output.index("Needs review")
+    assert "36 review items in 1 category" in output
+    assert "36 occurrences across 36 locations and 36 names" in output
+    assert "Declarations without matching imports" in output
+    assert "project/requirements.txt / line 8" in output
     assert "package7" in output
     assert "package8" in output
     assert "package9" in output
     assert "package10" not in output
-    assert "Showing 3 of 36 observations; 33 omitted from this view." in output
-    assert "Use --json for the complete retained" in output
-    assert "Evidence:" not in output
-    assert "python_import" not in output
-    assert "dependency_declaration" not in output
+    assert "Showing 3 names and 3 locations from 36 names and 36 locations" in output
+    assert "source records" not in output
+    assert "python.dependencies" not in output
     assert len(output) < 5_000
 
 
-def test_limitations_precede_overview_and_display_omission_stays_distinct(
+def test_limits_are_separate_from_findings_and_keep_nested_location(
     checker_inputs,
 ) -> None:
     report = _check_document(checker_inputs.paths["evidence_heavy_limited_zip"])
     output = _render(report)
 
-    assert output.index("Inspection limitations") < output.index("Overview")
-    assert "Maximum nested ZIP depth reached" in output
-    assert (
-        "At least one nested ZIP was inventoried but not opened beyond depth 3."
-        in output
-    )
-    assert "Showing 3 of 36 observations; 33 omitted from this view." in output
-    assert "33 omitted from inspection" not in output
-    assert "partial" in output
-    assert "Inventory: 1 occurrence" in output
-    assert "Rule coverage: 1 skipped input in each of 5 rules" in output
-    assert output.count("Nested ZIP depth limit") == 1
-    assert "four.zip — four.zip" not in output
+    assert output.index("Content analyzed") < output.index("Limits reached")
+    assert output.index("Limits reached") < output.index("Needs review")
+    assert output.count("Nested ZIP depth") == 1
+    assert "Archive structure, Absolute paths, Dependencies" in output
+    assert "one.zip → two.zip → three.zip → four.zip" in output
+    assert "resource limit" not in output.casefold()
+    assert "36 review items in 1 category" in output
 
 
-def test_zero_observations_are_stated_once_without_a_verdict(checker_inputs) -> None:
+def test_complete_empty_report_has_no_verdict(checker_inputs) -> None:
     output = _render(_check_document(checker_inputs.paths["minimal_python"]))
 
-    assert output.count("No findings or human-review observations were produced.") == 1
-    assert "11 rules total:" in output
+    assert output.count("No artifact findings reported.") == 1
+    assert output.count("No review items reported.") == 1
     assert "passed" not in output.casefold()
     assert "all clear" not in output.casefold()
 
 
-def test_observations_remain_visible_beside_parse_failures(tmp_path: Path) -> None:
+def test_comment_result_remains_visible_beside_python_parse_failure(
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "parse-failure.py"
     source.write_text(
         "# download https://example.test/data\ndef broken(:\n",
@@ -97,14 +111,93 @@ def test_observations_remain_visible_beside_parse_failures(tmp_path: Path) -> No
     )
     output = _render(_check_document(source))
 
-    assert output.index("Inspection limitations") < output.index("Overview")
-    assert "Download comments containing HTTP URLs" in output
-    assert "1 human-review observation" in output
-    assert "1 human-review topic" in output
-    assert "syntax error" in output.casefold()
+    assert output.index("Checks failed") < output.index("Needs review")
+    assert "Python parsing failed" in output
+    assert "Download comments" in output
+    assert "1 review item in 1 category" in output
+    assert "parse-failure.py / line 1" in output
+    assert "No review items" not in output
 
 
-def test_same_condition_in_different_rules_or_kinds_forms_separate_groups(
+def test_all_nine_review_categories_keep_dependency_conditions(
+    checker_inputs,
+) -> None:
+    report = copy.deepcopy(_check_document(checker_inputs.paths["minimal_python"]))
+    observation_number = 0
+    for result in report["rule_results"][2:]:
+        result["status"] = "complete"
+        conditions = (
+            ["import_without_exact_declaration", "declaration_without_exact_import"]
+            if result["rule_id"] == "python.dependencies"
+            else [
+                {
+                    "python.sys-path-three-dot": "three_dot_path_segment",
+                    "python.download-comment-http-url": "download_comment_with_http_url",
+                    "python.open-bundled-archive-member": "read_path_only_in_bundled_archive",
+                    "python.pandas-csv-inventory-absence": "pandas_csv_not_in_inventory",
+                    "python.notebook-pip-install": "notebook_pip_install",
+                    "python.gdown-anonymized-value": "anonymized_download_identifier",
+                    "python.entry-point-input": "entry_point_stdin",
+                    "python.gfile-bucket-authority": "bucket_authority_literal",
+                }[result["rule_id"]]
+            ]
+        )
+        for condition in conditions:
+            result["observations"].append(
+                {
+                    "observation_id": f"observation:{observation_number}",
+                    "rule_id": result["rule_id"],
+                    "kind": "needs_human_review",
+                    "condition_code": condition,
+                    "member_id": None,
+                    "source_id": "source:0",
+                    "line": observation_number + 1,
+                    "cell": None,
+                    "snippet": f"example {observation_number}",
+                    "snippet_truncated": False,
+                    "evidence_ids": [],
+                }
+            )
+            observation_number += 1
+
+    output = _render(report, width=120)
+
+    assert "10 review items in 9 categories" in output
+    for title in REVIEW_TITLES:
+        assert title in output
+    assert "Imports without matching declarations" in output
+    assert "Declarations without matching imports" in output
+
+
+def test_multiple_imports_on_one_line_have_one_distinct_location(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "same-line.py"
+    source.write_text("import missing_alpha, missing_beta\n", encoding="utf-8")
+
+    output = _render(_check_document(source))
+
+    assert "2 occurrences across 1 location and 2 names" in output
+    assert "same-line.py / line 1" in output
+
+
+def test_linked_archive_evidence_keeps_both_locations(tmp_path: Path) -> None:
+    nested_output = BytesIO()
+    with zipfile.ZipFile(nested_output, "w") as nested:
+        nested.writestr("data.csv", "a,b\n1,2\n")
+    source = tmp_path / "linked.zip"
+    with zipfile.ZipFile(source, "w") as archive:
+        archive.writestr("main.py", "open('data.csv')\n")
+        archive.writestr("bundle.zip", nested_output.getvalue())
+
+    output = _render(_check_document(source))
+
+    assert "Files inside archives" in output
+    assert "Related: bundled archive member" in output
+    assert "bundle.zip → data.csv" in output
+
+
+def test_same_condition_in_finding_and_review_stays_in_separate_sections(
     checker_inputs,
 ) -> None:
     report = copy.deepcopy(_check_document(checker_inputs.paths["evidence_heavy_zip"]))
@@ -130,10 +223,9 @@ def test_same_condition_in_different_rules_or_kinds_forms_separate_groups(
     output = _render(report)
 
     assert output.count("Shared condition") == 2
-    assert "(archive.structure)" in output
-    assert "(python.dependencies)" in output
-    assert "1 finding" in output
-    assert "36 human-review observations" in output
+    assert output.index("Findings") < output.index("Needs review")
+    assert "1 artifact finding" in output
+    assert "36 review items in 1 category" in output
 
 
 def test_renderer_preserves_literal_markup_and_escapes_terminal_controls(
@@ -173,3 +265,18 @@ def test_console_honors_no_color_and_redirected_output(
     assert console.no_color is True
     assert console.color_system is None
     assert "\x1b[" not in output.getvalue()
+
+
+def test_narrow_output_folds_long_identity_and_locations(tmp_path: Path) -> None:
+    parts = [f"segment{index:02d}" for index in range(10)]
+    source = tmp_path / ("-".join(parts) + ".py")
+    source.write_text("open('/tmp/input.csv')\n", encoding="utf-8")
+
+    output = _render(_check_document(source), width=52)
+
+    assert "Artifact" in output
+    assert "Name" in output
+    assert "line 1" in output
+    assert "…" not in output
+    for part in parts:
+        assert part in output

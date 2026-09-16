@@ -20,7 +20,7 @@ Each rule has one coverage status. Coverage describes what was inspected, not wh
 
 Skipped and failed inputs stay attached to each affected rule. Decode or parse failures in supported sources prevent complete coverage. Unsupported source-like content remains in the inventory or source index without necessarily affecting unrelated Python rules.
 
-The JSON Schema enforces field types, rule positions, and the status constraints it can represent. The producer also enforces unique consecutive IDs, valid member/source/evidence references, matching parent and observation rule IDs, and no duplicate discovered rule IDs.
+The JSON Schema enforces field types, rule positions, and the status constraints it can represent. The producer and saved-report viewer also enforce unique member and source IDs, valid inventory, parent, source, observation, and evidence links, matching observation ownership, and no duplicate discovered rule IDs.
 
 ## Input classification
 
@@ -66,6 +66,8 @@ Lists have these deterministic orders:
 - Skipped and failed inputs sort by numeric source ID, numeric member ID, reason code, and message template.
 
 JSON fields follow schema declaration order. Limit accounting uses compact UTF-8 JSON and rejects non-finite numbers. Indentation may change; list order does not.
+
+`reproready view` admits checker schema-v1 reports through a separate 128 MiB file bound. It accepts both compact and pretty-printed JSON under that bound, then applies the packaged schema and the reference checks above without reopening the artifact.
 
 ## Fixed limits
 
@@ -144,7 +146,7 @@ Decoded literals receive the first matching syntax class:
 
 Observations include the source member, one-based notebook cell when applicable, one-based line, syntax snippet, and decoded syntax class. The rule does not propagate constants, inspect other call positions, resolve aliases, determine reachability, or interpret paths using the host OS.
 
-Supported notebooks use nbformat 4 with code-cell `source` as a string or list of strings. Only code-cell source is parsed. Malformed JSON, other notebook versions, conflicting or non-Python language metadata, magics, shell escapes, and mixed-language cells remain explicit partial or unsupported source records.
+Supported notebooks use nbformat 4 with code-cell `source` as a string or list of strings. Only code-cell source is parsed. Malformed JSON, other notebook versions, conflicting or non-Python language metadata, magics, shell escapes, and mixed-language cells remain explicit partial or unsupported content.
 
 ## `python.dependencies`
 

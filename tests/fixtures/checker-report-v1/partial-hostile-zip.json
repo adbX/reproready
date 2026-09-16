@@ -385,7 +385,7 @@
           "member_id": "member:1",
           "source_id": "source:1",
           "reason_code": "syntax_error",
-          "message": "This applicable Python input failed during rule inspection."
+          "message": "This Python source or notebook cell could not be analyzed."
         }
       ]
     },
@@ -415,7 +415,7 @@
           "member_id": "member:1",
           "source_id": "source:1",
           "reason_code": "syntax_error",
-          "message": "This applicable Python input failed during rule inspection."
+          "message": "This Python source or notebook cell could not be analyzed."
         }
       ]
     },
@@ -437,7 +437,7 @@
           "member_id": "member:1",
           "source_id": "source:1",
           "reason_code": "syntax_error",
-          "message": "This applicable Python input failed during rule inspection."
+          "message": "This Python source or notebook cell could not be analyzed."
         }
       ]
     },
@@ -460,7 +460,7 @@
           "member_id": "member:1",
           "source_id": "source:1",
           "reason_code": "syntax_error",
-          "message": "This applicable Python input failed during rule inspection."
+          "message": "This Python source or notebook cell could not be analyzed."
         }
       ]
     },
@@ -475,7 +475,7 @@
           "member_id": "member:1",
           "source_id": "source:1",
           "reason_code": "syntax_error",
-          "message": "This applicable Python input failed during rule inspection."
+          "message": "This Python source or notebook cell could not be analyzed."
         }
       ]
     },
@@ -490,7 +490,7 @@
           "member_id": "member:1",
           "source_id": "source:1",
           "reason_code": "syntax_error",
-          "message": "This applicable Python input failed during rule inspection."
+          "message": "This Python source or notebook cell could not be analyzed."
         }
       ]
     }

@@ -6,6 +6,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Added `reproready view REPORT.json [--all]` with bounded regular-file loading, strict JSON decoding, packaged-schema validation, and cross-record reference checks. Checker JSON is now compact with one trailing newline, and the shared terminal renderer separates analyzed content, skipped and failed work, reached limits, artifact findings, and nine possible review categories while preserving complete retained detail in JSON.
+- Revised command help, score tables, diagnostics, and fixed report explanations. The score display now names stages, channel grades, runnable code units, observable coverage, unavailable values, and out-of-scope stages without changing score calculations or score JSON.
+
 ## [0.2.0] - 2026-09-13
 
 - Added the public `check_path()` API and `reproready check PATH [--json]` command for the frozen

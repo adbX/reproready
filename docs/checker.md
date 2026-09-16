@@ -20,30 +20,32 @@ uv add 'reproready @ git+https://github.com/adbX/reproready.git@v0.2.0'
 
 ## Command-line interface
 
-Pass exactly one file path. Use `--json` for the full machine-readable report:
+Pass exactly one file path to `check`. Use `--json` to save the complete machine-readable report. Use `view` to validate and display a saved report without reopening the original artifact:
 
 ```sh
 reproready check artifact.zip
-reproready check artifact.zip --json
+reproready check artifact.zip --json > report.json
+reproready view report.json
+reproready view report.json --all
 ```
 
-Terminal output is noninteractive and adapts to terminal width. Redirected output is plain text; `NO_COLOR` disables styling. Meaning never depends on color. Version `0.2.0` has no `--details` mode or saved human-readable report.
+Terminal output is noninteractive and adapts to terminal width. Redirected output is plain text; `NO_COLOR` disables styling. Meaning never depends on color. `check` does not save implicitly, and the viewer accepts checker schema-v1 reports rather than score JSON.
 
 ## Interpreting output
 
-Read inspection limits before interpreting findings. The report starts with the sanitized filename, detected kind, member and source counts, then any inventory issues, reached limits, incomplete sources, or exceptional rule coverage.
+Read skipped checks, failed checks, and reached limits before interpreting findings. The display identifies the artifact and separates analyzed files, folders, Python files, notebooks, code cells, and dependency files where those units exist.
 
-Findings describe observed conditions; questions for review need context before a decision. [Rule statuses](checker-ruleset-v1.md#shared-coverage-semantics) describe inspection coverage, not whether an artifact passes. No findings does not prove that a condition is absent or that code is correct or reproducible.
+`Findings` reports observed archive or path conditions. `Needs review` can contain nine subject boxes: Dependencies, Python search paths, Download comments, Files inside archives, CSV files, Notebook setup, Download identifiers, User input, and Cloud storage. Each nonempty box states an action and shows source locations. Dependencies retains unmatched imports and unmatched declarations as different conditions.
 
-The terminal separates findings from questions for review and groups each by rule, observation kind, and condition code. A *topic* is one such group; an *occurrence* is one observation at a reported location. Multiple occurrences do not establish multiple defects or a shared cause.
+The compact view shows at most three distinct names or items per condition in deterministic report order. It preserves nested containers, duplicate-entry ordinals, notebook cells, source lines, and useful linked evidence. An omission notice distinguishes detail hidden by the display from shortened snippets and content that was not inspected. `view --all` displays every retained location and useful linked record.
 
-Each group shows at most three examples in deterministic report order, with sanitized member names, duplicate ordinals where needed, notebook cells, and source lines. Exact omitted counts describe examples hidden from the terminal, not content left uninspected. Only evidence directly linked to displayed examples appears there.
+Findings and review items require context before a decision. [Rule statuses](checker-ruleset-v1.md#shared-coverage-semantics) describe inspection coverage, not whether an artifact passes. Empty Findings and Needs review sections do not prove that code is correct, reproducible, or free of an uninspected condition.
 
-The summary counts findings, review occurrences, distinct review topics, and every represented rule status. Routine `complete` and `not_applicable` rules have no individual terminal rows; JSON retains every rule.
+### JSON output and saved reports
 
-### JSON output
+`check --json` writes exactly one compact schema-valid object followed by a newline, with no diagnostic on standard error for a valid report. It includes all retained artifact, runtime, limit, inventory, source, evidence, observation, coverage, and relationship records. Ordinary imports, standard-library classifications, and dependency declarations remain available here even when omitted from the compact terminal display.
 
-`--json` writes exactly one schema-valid object followed by a newline, with no diagnostic on standard error for a valid report. It includes all retained artifact, runtime, limit, inventory, source, evidence, observation, coverage, and relationship records. Ordinary imports, standard-library classifications, and dependency declarations remain available here even when omitted from the terminal.
+`view` accepts one regular, non-symbolic-link file of at most 128 MiB. This bound admits new compact output and older pretty-printed schema-v1 reports under the limit. The command uses strict UTF-8 and JSON decoding, rejects non-finite numbers, validates the packaged schema and cross-record references, and never fetches a schema or artifact. A valid saved report remains viewable after the original artifact changes or disappears.
 
 The [JSON Schema](../src/reproready/schemas/check-report-v1.schema.json) defines the full report. The checker does not produce HTML, JSON Lines, batch manifests, or a second artifact inventory.
 
@@ -97,24 +99,28 @@ Reports are deterministic for stable input within one tool and runtime version, 
 
 ## Process outcomes
 
-| Exit | Meaning |
-|---:|---|
-| 0 | A valid report exists, including findings, questions for review, partial coverage, unsupported content, or a represented worker error. |
-| 1 | An unexpected internal failure prevents a valid report. Standard error receives one fixed diagnostic without raw exception text or artifact data. |
-| 2 | `argparse` rejects the invocation, the operating system is unsupported, or top-level input admission rejects the path. |
+| Command | Exit | Meaning |
+|---|---:|---|
+| `check` | 0 | A valid report exists, including findings, review items, partial coverage, unsupported content, or a represented worker error. |
+| `check` | 1 | An unexpected internal failure prevents a valid report. Standard error receives one fixed diagnostic without raw exception text or artifact data. |
+| `check` | 2 | `argparse` rejects the invocation, the operating system is unsupported, or top-level input admission rejects the path. |
+| `view` | 0 | The saved checker report was validated and displayed. Its represented findings or failures do not change the exit status. |
+| `view` | 1 | An unexpected internal failure prevents display. |
+| `view` | 2 | The saved input is missing, unsafe, malformed, incompatible, schema-invalid, or has broken references. No partial report is written to standard output. |
 
-Findings and questions for review do not change the exit status.
+Findings and review items do not change either command's exit status.
 
 ## Worked example
 
-[`examples/checker-demo.py`](../examples/checker-demo.py) produces one lexical path finding and two review topics:
+[`examples/checker-demo.py`](../examples/checker-demo.py) produces one lexical path finding and two review boxes:
 
 ```sh
 reproready check examples/checker-demo.py
-reproready check examples/checker-demo.py --json
+reproready check examples/checker-demo.py --json > checker-demo-report.json
+reproready view checker-demo-report.json --all
 ```
 
-The groups are `posix_absolute_path`, `three_dot_path_segment`, and `download_comment_with_http_url`. The [example JSON report](../examples/checker-demo-report.json) also includes ordinary `pathlib` and `sys` evidence omitted from the terminal.
+The display shows `POSIX absolute paths` under Findings, plus `Python search paths` and `Download comments` under Needs review. The [example JSON report](../examples/checker-demo-report.json) also includes ordinary `pathlib` and `sys` evidence omitted from the compact terminal view.
 
 ## Safety boundary and nonclaims
 

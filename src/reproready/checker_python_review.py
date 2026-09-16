@@ -304,7 +304,7 @@ class ReviewCollector:
                     member_id,
                     source_id,
                     "python_tokenize_error",
-                    "This Python context could not be tokenized completely.",
+                    "This Python source or notebook cell could not be tokenized completely.",
                     True,
                 )
             )
@@ -1252,9 +1252,9 @@ def applicable_source_records(
                         source_id,
                         reason,
                         (
-                            "This applicable Python input failed during rule inspection."
+                            "This Python source or notebook cell could not be analyzed."
                             if failed
-                            else "This applicable Python input was skipped during rule inspection."
+                            else "This Python source or notebook cell was not analyzed."
                         ),
                         failed,
                     )

@@ -752,9 +752,9 @@ def test_dependency_renderer_escapes_values_and_prints_relationships(
     report = _check_document(path)
     report_validator.validate(report)
     output = _render(report)
-    assert "Dependency declarations without exact imports" in output
-    assert "1 human-review observation" in output
-    assert "requirements.txt · line 1" in output
+    assert "Declarations without matching imports" in output
+    assert "1 review item in 1 category" in output
+    assert "requirements.txt / line 1" in output
     assert "[bold]unsafe[/bold]\\u0007\\u202e" in output
     assert "evidence:0" not in output
     assert "\u0007" not in output
@@ -784,12 +784,13 @@ def test_dependency_renderer_shows_coordinates_relationships_and_coverage(
     report = _check_document(path)
     report_validator.validate(report)
     output = _render(report)
-    assert output.index("Inspection limitations") < output.index("Overview")
-    assert "Python dependencies (python.dependencies): partial" in output
-    assert "Imports without exact dependency declarations" in output
-    assert "Dependency declarations without exact imports" in output
-    assert "project/main.py · line 2" in output
-    assert "project/requirements.txt · line 2" in output
+    assert output.index("Checks skipped") < output.index("Checks failed")
+    assert output.index("Checks failed") < output.index("Needs review")
+    assert "Dependencies" in output
+    assert "Imports without matching declarations" in output
+    assert "Declarations without matching imports" in output
+    assert "project/main.py / line 2" in output
+    assert "project/requirements.txt / line 2" in output
     assert "project/setup.py" in output
     assert "project/broken.py" in output
     assert "member:" not in output
