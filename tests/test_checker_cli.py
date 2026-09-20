@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
+from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -17,6 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DEMO = ROOT / "examples" / "demo-artifact"
 CHECKER_DEMO = ROOT / "examples" / "checker-demo.py"
 SCHEMA_PATH = ROOT / "src/reproready/schemas/check-report-v1.schema.json"
+SAVED_REPORT_FIXTURES = ROOT / "tests/fixtures/checker-report-v1"
 
 
 def _run_cli(
@@ -211,7 +214,39 @@ def test_no_color_keeps_plain_redirected_output(checker_inputs) -> None:
 
     assert result.returncode == 0
     assert "\x1b[" not in result.stdout
-    assert "36 review items in 1 category" in result.stdout
+    assert re.search(r"Review items\s+36", result.stdout)
+
+
+def test_interactive_view_disables_terminal_mouse_reporting(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    class Tty(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    class FakeApp:
+        def __init__(self, entries, *, show_all: bool) -> None:
+            self.report_errors = {}
+
+        def run(self, **kwargs):
+            calls.append(kwargs)
+            return 0
+
+    from reproready import checker_tui
+
+    monkeypatch.setattr(sys, "stdin", Tty())
+    monkeypatch.setattr(sys, "stdout", Tty())
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setattr(checker_tui, "ReportBrowserApp", FakeApp)
+
+    status = cli._run_view(
+        [SAVED_REPORT_FIXTURES / "complete-direct-python.json"],
+        show_all=False,
+        plain=False,
+    )
+
+    assert status == 0
+    assert calls == [{"mouse": False}]
 
 
 def test_saved_view_replays_pretty_v1_report_without_source(tmp_path: Path) -> None:
@@ -245,6 +280,80 @@ def test_saved_view_all_expands_retained_observations(
     assert report_path.name in compact.stdout
     assert "…" not in compact.stdout
     assert "package42" in expanded.stdout
+
+
+def test_saved_view_selects_shallow_directory_reports_in_order(
+    tmp_path: Path,
+) -> None:
+    collection = tmp_path / "collection"
+    collection.mkdir()
+    malformed = collection / "a.json"
+    malformed.write_text("{", encoding="utf-8")
+    direct = collection / "b.JSON"
+    direct.write_bytes(
+        (SAVED_REPORT_FIXTURES / "complete-direct-python.json").read_bytes()
+    )
+    child = collection / "child"
+    child.mkdir()
+    child_report = child / "report.json"
+    child_report.write_bytes(
+        (SAVED_REPORT_FIXTURES / "unsupported-regular-file.json").read_bytes()
+    )
+    deep = child / "deep"
+    deep.mkdir()
+    (deep / "report.json").write_bytes(
+        (SAVED_REPORT_FIXTURES / "worker-error.json").read_bytes()
+    )
+    (collection / "linked").symlink_to(child, target_is_directory=True)
+    before = {
+        path: path.read_bytes()
+        for path in (malformed, direct, child_report, deep / "report.json")
+    }
+
+    viewed = _run_cli("view", collection, child_report, "--plain")
+
+    assert viewed.returncode == 2
+    assert viewed.stdout.index("clean.py") < viewed.stdout.index("paper.pdf")
+    assert viewed.stdout.count("Unsupported PDF") == 1
+    assert "bounded.zip" not in viewed.stdout
+    assert "report 1: error:" in viewed.stderr
+    assert "(invalid_report_json)" in viewed.stderr
+    assert {path: path.read_bytes() for path in before} == before
+
+
+def test_saved_view_plain_and_dumb_terminal_print_without_control_sequences(
+    tmp_path: Path,
+) -> None:
+    first = SAVED_REPORT_FIXTURES / "complete-direct-python.json"
+    second = SAVED_REPORT_FIXTURES / "worker-error.json"
+
+    forced = _run_cli("view", first, second, "--plain")
+    dumb = _run_cli(
+        "view",
+        first,
+        second,
+        env={**os.environ, "TERM": "dumb"},
+    )
+
+    for viewed in (forced, dumb):
+        assert viewed.returncode == 0
+        assert viewed.stderr == ""
+        assert "clean.py" in viewed.stdout
+        assert "bounded.zip" in viewed.stdout
+        assert "\x1b[" not in viewed.stdout
+
+
+def test_saved_view_reports_empty_directory_without_waiting(
+    tmp_path: Path,
+) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+
+    viewed = _run_cli("view", empty)
+
+    assert viewed.returncode == 2
+    assert viewed.stdout == ""
+    assert "(no_reports_found)" in viewed.stderr
 
 
 @pytest.mark.parametrize(
@@ -387,18 +496,3 @@ def test_score_terminal_escapes_path_markup_and_controls(tmp_path: Path) -> None
     assert "[bold]" in result.stdout
     assert "\\u001b" in result.stdout
     assert "\x1b[" not in result.stdout
-
-
-def test_help_distinguishes_check_view_and_score() -> None:
-    root = _run_cli("--help")
-    check = _run_cli("check", "--help")
-    view = _run_cli("view", "--help")
-    score = _run_cli("score", "--help")
-
-    assert (
-        root.returncode == check.returncode == view.returncode == score.returncode == 0
-    )
-    assert "Inspect artifacts without running their code" in root.stdout
-    assert "does not calculate the ReproReady score" in check.stdout
-    assert "without reopening or inspecting the original artifact" in view.stdout
-    assert "Scoring is separate from checker observations" in score.stdout

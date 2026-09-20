@@ -6,7 +6,7 @@ import os
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO, cast
+from typing import Literal, TextIO, cast
 
 from rich.console import Console, Group, RenderableType
 from rich.panel import Panel
@@ -24,31 +24,95 @@ _BIDI_CODEPOINTS = {
 }
 
 
+SectionKey = Literal[
+    "artifact",
+    "content",
+    "limits",
+    "skipped",
+    "failed",
+    "findings",
+    "review",
+    "saved",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class SectionSpec:
+    key: SectionKey
+    title: str
+    short_title: str
+    meaning: str
+
+
+SECTION_SPECS = (
+    SectionSpec(
+        "artifact",
+        "Artifact",
+        "Artifact",
+        "Identifies the input described by this saved report.",
+    ),
+    SectionSpec(
+        "content",
+        "Content analyzed",
+        "Content",
+        "Lists the input's contents separately from the source content the checker analyzed.",
+    ),
+    SectionSpec(
+        "limits",
+        "Limits reached",
+        "Limits",
+        "Shows recorded bounds on inspection or saved report detail.",
+    ),
+    SectionSpec(
+        "skipped",
+        "Checks skipped",
+        "Skipped",
+        "Shows content or checks omitted from inspection.",
+    ),
+    SectionSpec(
+        "failed",
+        "Checks failed",
+        "Failed",
+        "Shows errors encountered during inspection.",
+    ),
+    SectionSpec(
+        "findings",
+        "Findings",
+        "Findings",
+        "Shows saved observations from archive-structure and absolute-path checks.",
+    ),
+    SectionSpec(
+        "review",
+        "Needs review",
+        "Review",
+        "Shows saved observations that call for human interpretation.",
+    ),
+    SectionSpec(
+        "saved",
+        "Saved report",
+        "Saved",
+        "Identifies the saved report and the detail available without reopening the original input.",
+    ),
+)
+SECTION_KEYS: tuple[SectionKey, ...] = tuple(spec.key for spec in SECTION_SPECS)
+_SECTION_BY_KEY = {spec.key: spec for spec in SECTION_SPECS}
+
+
 @dataclass(frozen=True, slots=True)
 class _Palette:
-    identity_border: str
-    content_band: str
-    content_border: str
-    incomplete_band: str
-    incomplete_border: str
-    finding_band: str
-    finding_border: str
-    review_band: str
-    review_border: str
-    metadata: str
+    accent: str
+    attention: str
+    error: str
+    location: str
+    box_border: str
 
 
 _PALETTE = _Palette(
-    identity_border="#4f7890",
-    content_band="bold bright_white on #355c7d",
-    content_border="#5d8098",
-    incomplete_band="bold #2b2111 on #d8a84e",
-    incomplete_border="#aa7a27",
-    finding_band="bold bright_white on #6e4b70",
-    finding_border="#806282",
-    review_band="bold #102926 on #66b3a6",
-    review_border="#4f8f86",
-    metadata="#74828c",
+    accent="#5ca89e",
+    attention="#c99a45",
+    error="#c66f6f",
+    location="#6f9ec5",
+    box_border="#77746b",
 )
 
 _KIND_TITLES = {
@@ -128,47 +192,47 @@ _REVIEW_SPECS = (
     _ReviewSpec(
         "python.dependencies",
         "Dependencies",
-        "Compare imports with dependency declarations.",
+        "What explains each import or declaration without an exact match?",
     ),
     _ReviewSpec(
         "python.sys-path-three-dot",
         "Python search paths",
-        "Confirm whether each three-dot path is intentional and portable.",
+        "Is each three-dot path intentional and portable?",
     ),
     _ReviewSpec(
         "python.download-comment-http-url",
         "Download comments",
-        "Decide whether each URL describes a required acquisition step.",
+        "Does each URL describe a required acquisition step?",
     ),
     _ReviewSpec(
         "python.open-bundled-archive-member",
         "Files inside archives",
-        "Confirm how each archived file becomes available to its read call.",
+        "How does each archived file become available to its read call?",
     ),
     _ReviewSpec(
         "python.pandas-csv-inventory-absence",
         "CSV files",
-        "Confirm how each absent CSV path is supplied.",
+        "How is each CSV file supplied?",
     ),
     _ReviewSpec(
         "python.notebook-pip-install",
         "Notebook setup",
-        "Decide whether each install command is required setup.",
+        "Is each install command required setup?",
     ),
     _ReviewSpec(
         "python.gdown-anonymized-value",
         "Download identifiers",
-        "Replace or explain each anonymized download value.",
+        "What does each anonymized download value represent?",
     ),
     _ReviewSpec(
         "python.entry-point-input",
         "User input",
-        "Confirm how standard input is supplied.",
+        "How is standard input supplied?",
     ),
     _ReviewSpec(
         "python.gfile-bucket-authority",
         "Cloud storage",
-        "Confirm each literal bucket name and its access requirements.",
+        "What does each literal bucket name identify, and what access does it require?",
     ),
 )
 
@@ -186,6 +250,45 @@ _LIMIT_TITLES = {
     "max_elapsed_seconds": "Inspection time",
     "max_observations": "Reported observations",
     "max_report_bytes": "Encoded report size",
+}
+_LIMIT_EXPLANATIONS = {
+    "max_input_bytes": (
+        "The input exceeded the byte limit for creating the inspection snapshot."
+    ),
+    "max_member_count": (
+        "The archive-entry limit stopped further inventory inspection."
+    ),
+    "max_nested_zip_depth": (
+        "A nested ZIP was inventoried but not opened because it exceeded the "
+        "supported nesting depth."
+    ),
+    "max_expanded_bytes_per_member": (
+        "An archive entry exceeded the per-entry expanded-byte limit."
+    ),
+    "max_expanded_bytes_total": (
+        "The total expanded-byte limit restricted archive inspection."
+    ),
+    "max_python_source_bytes": (
+        "A Python file or notebook code cell exceeded the source-size limit for "
+        "analysis."
+    ),
+    "max_notebook_bytes": ("A notebook exceeded the notebook-size limit for analysis."),
+    "max_dependency_file_bytes": (
+        "A dependency file exceeded the dependency-file-size limit for analysis."
+    ),
+    "max_worker_rss_bytes": (
+        "The inspection worker reached its resident-memory limit."
+    ),
+    "max_temporary_bytes": "The checker reached its temporary-storage bound.",
+    "max_elapsed_seconds": ("The inspection worker reached its elapsed-time limit."),
+    "max_observations": (
+        "The observation bound restricted saved results and may also have stopped "
+        "further observation collection."
+    ),
+    "max_report_bytes": (
+        "The encoded-report bound restricted saved records and may also have "
+        "stopped further inspection."
+    ),
 }
 _LIMIT_REASONS = {
     "max_input_bytes": {"max_input_bytes"},
@@ -357,11 +460,25 @@ def _limit_value(limit: str, value: object) -> str:
     return str(value)
 
 
-def _print_band(console: Console, title: str, style: str) -> None:
-    console.print()
-    band = Table.grid(expand=True, padding=(0, 1))
-    band.add_row(Text(title, style="bold"), style=style)
-    console.print(band)
+def _spaced_group(renderables: list[RenderableType]) -> Group:
+    spaced: list[RenderableType] = []
+    for renderable in renderables:
+        if spaced:
+            spaced.append(Text(""))
+        spaced.append(renderable)
+    return Group(*spaced)
+
+
+def _section_heading(spec: SectionSpec) -> Text:
+    return Text(spec.title, style=f"bold {_PALETTE.accent}")
+
+
+def _summary_block(content: RenderableType) -> Table:
+    summary = Table.grid(expand=True, padding=(0, 1))
+    summary.add_column(style="bold", no_wrap=True)
+    summary.add_column(ratio=1, overflow="fold")
+    summary.add_row("Summary", content)
+    return summary
 
 
 def _index_report(report: _Record) -> _ReportIndex:
@@ -456,12 +573,12 @@ def _unique_records(records: list[_Record], index: _ReportIndex) -> list[_Record
     return unique
 
 
-def _print_identity(console: Console, index: _ReportIndex) -> None:
+def _identity_panel(index: _ReportIndex) -> Panel:
     artifact = cast(_Record, index.report["artifact"])
     details = Table.grid(padding=(0, 2))
-    details.add_column(style="bold")
+    details.add_column(style="bold", no_wrap=True)
     details.add_column(ratio=1, overflow="fold")
-    details.add_row("Name", _terminal_text(artifact["display_name"]))
+    details.add_row("Name", _terminal_text(artifact["display_name"], _PALETTE.accent))
     details.add_row(
         "Format",
         _terminal_text(
@@ -472,18 +589,18 @@ def _print_identity(console: Console, index: _ReportIndex) -> None:
         ),
     )
     details.add_row(
-        "Size", _terminal_text(_human_size(cast(int, artifact["size_bytes"])))
+        "Size",
+        _terminal_text(_human_size(cast(int, artifact["size_bytes"]))),
     )
     if not artifact["snapshot_complete"]:
         details.add_row("Snapshot", Text("Incomplete", style="bold"))
-    console.print(
-        Panel(
-            details,
-            title="Artifact",
-            title_align="left",
-            border_style=_PALETTE.identity_border,
-            expand=True,
-        )
+    return Panel(
+        details,
+        title=Text("Artifact identity", style="bold"),
+        title_align="left",
+        border_style=_PALETTE.box_border,
+        padding=(0, 1),
+        expand=True,
     )
 
 
@@ -505,7 +622,7 @@ def _source_rows(index: _ReportIndex) -> list[tuple[str, int, int, int]]:
     return rows
 
 
-def _content_panel(index: _ReportIndex) -> Group:
+def _content_panel(index: _ReportIndex) -> Panel:
     renderables: list[RenderableType] = []
     kinds = Counter(cast(str, member["kind"]) for member in index.members.values())
     inventory_rows = (
@@ -522,7 +639,7 @@ def _content_panel(index: _ReportIndex) -> Group:
         inventory_table.add_column("Count", justify="right")
         for label, count in inventory_rows:
             if count:
-                inventory_table.add_row(label, str(count))
+                inventory_table.add_row(label, Text(str(count), style="bold"))
         if inventory["status"] != "complete":
             inventory_table.add_row(
                 "Inventory status", _terminal_text(inventory["status"])
@@ -533,23 +650,32 @@ def _content_panel(index: _ReportIndex) -> Group:
     if source_rows:
         source_table = Table(box=None, pad_edge=False, expand=True)
         source_table.add_column("Source content", style="bold")
-        source_table.add_column("Found", justify="right")
+        source_table.add_column("In report", justify="right")
         source_table.add_column("Analyzed", justify="right")
-        source_table.add_column("Incomplete", justify="right")
+        source_table.add_column("Not fully analyzed", justify="right")
         for label, found, analyzed, incomplete in source_rows:
             source_table.add_row(
                 label,
-                str(found),
-                str(analyzed),
-                str(incomplete) if incomplete else "—",
+                Text(str(found), style="bold"),
+                Text(str(analyzed), style="bold"),
+                Text(str(incomplete), style="bold"),
             )
-        if renderables:
-            renderables.append(Text(""))
         renderables.append(source_table)
 
     if not renderables:
-        renderables.append(Text("No supported source content was analyzed."))
-    return Group(*renderables)
+        renderables.append(
+            Text(
+                "No archive entries or source-analysis records are saved in the report."
+            )
+        )
+    return Panel(
+        _spaced_group(renderables),
+        title=Text("Report contents"),
+        title_align="left",
+        border_style=_PALETTE.box_border,
+        padding=(0, 1),
+        expand=True,
+    )
 
 
 def _coverage_groups(index: _ReportIndex) -> list[_CoverageGroup]:
@@ -665,21 +791,28 @@ def _detail_line(
     total: int,
     unit: str,
     report_path: Path | None,
+    *,
+    interactive: bool,
 ) -> Text | None:
     if shown >= total:
         return None
-    omitted = total - shown
+    noun = _count(total, unit).split(" ", 1)[1]
     line = Text(
-        f"Showing {shown} of {total} {_count(total, unit).split(' ', 1)[1]}; "
-        f"{omitted} omitted from this display. ",
+        f"{noun.capitalize()} shown: {shown} of {total}. ",
         style="dim",
     )
-    if report_path is not None:
-        line.append("See all retained detail in ")
-        _append(line, report_path)
-        line.append(" with --all.")
+    if interactive:
+        line.append("Press a to show all saved detail for this artifact.", style="dim")
+    elif report_path is not None:
+        line.append("See all saved detail in ", style="dim")
+        _append(line, report_path, f"not dim {_PALETTE.location}")
+        line.append(" with --all.", style="dim")
     else:
-        line.append("Use check INPUT --json to save the complete retained report.")
+        line.append(
+            "For a later inspection, save JSON with check INPUT --json, then use "
+            "view --all.",
+            style="dim",
+        )
     return line
 
 
@@ -689,6 +822,7 @@ def _coverage_panel(
     *,
     report_path: Path | None,
     show_all: bool,
+    interactive: bool,
 ) -> Panel:
     title = _REASON_TITLES.get(group.reason, "Inspection incomplete")
     if group.reason == "unsupported_dependency_form" and group.records:
@@ -700,83 +834,94 @@ def _coverage_panel(
     shown = records if show_all else records[:_COMPACT_SUBJECTS]
     content = Table(box=None, pad_edge=False, expand=True)
     content.add_column("Format", style="bold")
-    content.add_column("Affected content", overflow="fold")
+    content.add_column("Affected location", overflow="fold")
     for record in shown:
         content.add_row(
             _record_format(record, index),
-            _terminal_text(_location(record, index)),
+            _terminal_text(_location(record, index), _PALETTE.location),
         )
     if not records:
         artifact = cast(_Record, index.report["artifact"])
         content.add_row(
             _KIND_TITLES.get(cast(str, artifact["detected_kind"]), "Artifact"),
-            _terminal_text(artifact["display_name"]),
+            _terminal_text(artifact["display_name"], _PALETTE.location),
         )
 
     rows = Table.grid(padding=(0, 2))
-    rows.add_column(style="bold")
+    rows.add_column(style="bold", no_wrap=True)
     rows.add_column(ratio=1, overflow="fold")
     if group.scopes:
         rows.add_row("Affected checks", _joined_checks(group.scopes))
     explanation = _REASON_EXPLANATIONS.get(group.reason, group.message)
-    if explanation is not None:
-        rows.add_row("Result", _terminal_text(explanation))
+    if explanation is None:
+        explanation = (
+            "The report records this reason without an additional explanation."
+        )
+    rows.add_row("Result", _terminal_text(explanation))
 
-    renderables: list[RenderableType] = [rows, Text(""), content]
-    detail = _detail_line(len(shown), len(records), "affected item", report_path)
+    renderables: list[RenderableType] = [rows, content]
+    detail = _detail_line(
+        len(shown),
+        len(records),
+        "affected location",
+        report_path,
+        interactive=interactive,
+    )
     if detail is not None:
-        renderables.extend((Text(""), detail))
+        renderables.append(detail)
+    title_style = (
+        f"bold {_PALETTE.error}" if group.field_name == "failed_inputs" else "bold"
+    )
     return Panel(
-        Group(*renderables),
-        title=title,
+        _spaced_group(renderables),
+        title=Text(title, style=title_style),
         title_align="left",
-        border_style=_PALETTE.incomplete_border,
+        border_style=_PALETTE.box_border,
+        padding=(0, 1),
         expand=True,
     )
 
 
-def _print_incomplete_sections(
-    console: Console,
+def _incomplete_section(
     groups: list[_CoverageGroup],
     index: _ReportIndex,
+    field_name: str,
     *,
     report_path: Path | None,
     show_all: bool,
-) -> None:
-    ordinary = [group for group in groups if group.reason not in _LIMIT_REASON_NAMES]
-    for field_name, title in (
-        ("skipped_inputs", "Checks skipped"),
-        ("failed_inputs", "Checks failed"),
-    ):
-        matching = [group for group in ordinary if group.field_name == field_name]
-        if not matching:
-            continue
-        _print_band(console, title, _PALETTE.incomplete_band)
-        for group in matching:
-            console.print(
-                _coverage_panel(
-                    group,
-                    index,
-                    report_path=report_path,
-                    show_all=show_all,
-                )
+    interactive: bool,
+) -> Group:
+    matching = [
+        group
+        for group in groups
+        if group.reason not in _LIMIT_REASON_NAMES and group.field_name == field_name
+    ]
+    return _spaced_group(
+        [
+            _coverage_panel(
+                group,
+                index,
+                report_path=report_path,
+                show_all=show_all,
+                interactive=interactive,
             )
+            for group in matching
+        ]
+    )
 
 
-def _print_limits(
-    console: Console,
+def _limit_sections(
     groups: list[_CoverageGroup],
     index: _ReportIndex,
     *,
     report_path: Path | None,
     show_all: bool,
-) -> None:
+    interactive: bool,
+) -> Group:
+    renderables: list[RenderableType] = []
     limits = cast(_Record, index.report["limits"])
     reached = cast(list[str], limits["reached"])
-    if not reached:
-        return
     effective = cast(_Record, limits["effective"])
-    _print_band(console, "Limits reached", _PALETTE.incomplete_band)
     for limit in reached:
         reasons = _LIMIT_REASONS.get(limit, set())
         related = [group for group in groups if group.reason in reasons]
@@ -791,9 +936,18 @@ def _print_limits(
         shown = records if show_all else records[:_COMPACT_SUBJECTS]
 
         rows = Table.grid(padding=(0, 2))
-        rows.add_column(style="bold")
+        rows.add_column(style="bold", no_wrap=True)
         rows.add_column(ratio=1, overflow="fold")
-        rows.add_row("Limit", _limit_value(limit, effective[limit]))
+        explanation = _LIMIT_EXPLANATIONS.get(limit)
+        if explanation is not None:
+            rows.add_row("Result", explanation)
+        rows.add_row(
+            "Effective limit",
+            Text(
+                _limit_value(limit, effective[limit]),
+                style=f"bold {_PALETTE.attention}",
+            ),
+        )
         if scopes:
             rows.add_row("Affected checks", _joined_checks(scopes))
         if shown:
@@ -801,25 +955,37 @@ def _print_limits(
             for position, record in enumerate(shown):
                 if position:
                     locations.append("\n")
-                locations.append_text(_terminal_text(_location(record, index)))
-            rows.add_row("Affected content", locations)
+                locations.append_text(
+                    _terminal_text(_location(record, index), _PALETTE.location)
+                )
+            rows.add_row("Affected locations", locations)
         else:
-            artifact = cast(_Record, index.report["artifact"])
-            rows.add_row("Affected content", _terminal_text(artifact["display_name"]))
+            rows.add_row(
+                "Affected locations",
+                "No specific affected location is saved for this limit.",
+            )
 
-        renderables: list[RenderableType] = [rows]
-        detail = _detail_line(len(shown), len(records), "affected item", report_path)
+        content: list[RenderableType] = [rows]
+        detail = _detail_line(
+            len(shown),
+            len(records),
+            "affected location",
+            report_path,
+            interactive=interactive,
+        )
         if detail is not None:
-            renderables.extend((Text(""), detail))
-        console.print(
+            content.append(detail)
+        renderables.append(
             Panel(
-                Group(*renderables),
-                title=_LIMIT_TITLES.get(limit, limit),
+                _spaced_group(content),
+                title=Text(_LIMIT_TITLES.get(limit, limit), style=_PALETTE.attention),
                 title_align="left",
-                border_style=_PALETTE.incomplete_border,
+                border_style=_PALETTE.box_border,
+                padding=(0, 1),
                 expand=True,
             )
         )
+    return _spaced_group(renderables)
 
 
 def _observation_groups(
@@ -916,17 +1082,25 @@ def _useful_evidence(
 
 
 def _summary_line(
-    group: _ObservationGroup, subjects: list[_SubjectGroup], index: _ReportIndex
+    group: _ObservationGroup,
+    subjects: list[_SubjectGroup],
+    index: _ReportIndex,
 ) -> Text:
     locations = {
         _location_key(observation, index) for observation in group.observations
     }
-    line = Text(
-        f"{_count(len(group.observations), 'occurrence')} across "
-        f"{_count(len(locations), 'location')}"
-    )
+    line = Text()
+    metrics = [
+        (len(group.observations), "occurrence", "occurrences"),
+        (len(locations), "location", "locations"),
+    ]
     if group.rule_id == "python.dependencies":
-        line.append(f" and {_count(len(subjects), 'name')}")
+        metrics.append((len(subjects), "name", "names"))
+    for position, (count, singular, plural) in enumerate(metrics):
+        if position:
+            line.append("  ·  ", style="dim")
+        line.append(str(count), style="bold")
+        line.append(f" {singular if count == 1 else plural}")
     return line
 
 
@@ -939,7 +1113,7 @@ def _observation_table(
 ) -> tuple[Table, int, int]:
     selected_subjects = subjects if show_all else subjects[:_COMPACT_SUBJECTS]
     table = Table(box=None, pad_edge=False, expand=True)
-    table.add_column("Evidence", style="bold", ratio=2, overflow="fold")
+    table.add_column("Evidence", ratio=2, overflow="fold")
     table.add_column("Occurrences", justify="right", no_wrap=True)
     table.add_column("Location", ratio=3, overflow="fold")
     displayed_locations: set[tuple[object, ...]] = set()
@@ -950,8 +1124,12 @@ def _observation_table(
             label = subject.label if position == 0 else ""
             table.add_row(
                 _terminal_text(label),
-                str(len(subject.observations)) if position == 0 else "",
-                _terminal_text(_location(observation, index)),
+                (
+                    Text(str(len(subject.observations)), style="bold")
+                    if position == 0
+                    else ""
+                ),
+                _terminal_text(_location(observation, index), _PALETTE.location),
             )
             displayed_locations.add(_location_key(observation, index))
             snippet = observation.get("snippet")
@@ -960,8 +1138,8 @@ def _observation_table(
                 and snippet is not None
                 and str(snippet) != str(subject.label)
             ):
-                context = Text("Context: ", style="dim")
-                _append(context, snippet, "dim")
+                context = Text("Context  ", style="dim")
+                _append(context, snippet)
                 table.add_row(context, "", "")
             evidence_records = [
                 evidence
@@ -971,14 +1149,14 @@ def _observation_table(
             if not show_all:
                 evidence_records = evidence_records[:1]
             for evidence in evidence_records:
-                relation = Text("Related: ", style="dim")
+                relation = Text("Related  ", style="dim")
                 relation.append(str(evidence["kind"]).replace("_", " "), style="dim")
                 relation.append(" = ", style="dim")
-                _append(relation, evidence["value"], "dim")
+                _append(relation, evidence["value"])
                 table.add_row(
                     relation,
                     "",
-                    _terminal_text(_location(evidence, index), "dim"),
+                    _terminal_text(_location(evidence, index), _PALETTE.location),
                 )
     return table, len(selected_subjects), len(displayed_locations)
 
@@ -990,6 +1168,8 @@ def _observation_detail_line(
     displayed_locations: int,
     index: _ReportIndex,
     report_path: Path | None,
+    *,
+    interactive: bool,
 ) -> Text | None:
     locations = {
         _location_key(observation, index) for observation in group.observations
@@ -998,17 +1178,22 @@ def _observation_detail_line(
         return None
     subject_unit = "name" if group.rule_id == "python.dependencies" else "item"
     line = Text(
-        f"Showing {_count(displayed_subjects, subject_unit)} and "
-        f"{_count(displayed_locations, 'location')} from "
-        f"{_count(len(subjects), subject_unit)} and {_count(len(locations), 'location')}. ",
+        f"Saved {subject_unit}s shown: {displayed_subjects} of {len(subjects)}. "
+        f"Locations shown: {displayed_locations} of {len(locations)}. ",
         style="dim",
     )
-    if report_path is not None:
-        line.append("See all retained detail in ")
-        _append(line, report_path)
-        line.append(" with --all.")
+    if interactive:
+        line.append("Press a to show all saved detail for this artifact.", style="dim")
+    elif report_path is not None:
+        line.append("See all saved detail in ", style="dim")
+        _append(line, report_path, f"not dim {_PALETTE.location}")
+        line.append(" with --all.", style="dim")
     else:
-        line.append("Use check INPUT --json to save the complete retained report.")
+        line.append(
+            "For a later inspection, save JSON with check INPUT --json, then use "
+            "view --all.",
+            style="dim",
+        )
     return line
 
 
@@ -1016,9 +1201,9 @@ def _observation_body(
     group: _ObservationGroup,
     index: _ReportIndex,
     *,
-    action: str | None,
     report_path: Path | None,
     show_all: bool,
+    interactive: bool,
 ) -> Group:
     subjects = _subject_groups(group, index)
     table, displayed_subjects, displayed_locations = _observation_table(
@@ -1028,13 +1213,11 @@ def _observation_body(
         show_all=show_all,
     )
     summary = Table.grid(padding=(0, 2))
-    summary.add_column(style="bold")
+    summary.add_column(style="bold", no_wrap=True)
     summary.add_column(ratio=1, overflow="fold")
-    if action is not None:
-        summary.add_row("Action", action)
-    summary.add_row("Reported", _summary_line(group, subjects, index))
+    summary.add_row("Saved", _summary_line(group, subjects, index))
 
-    renderables: list[RenderableType] = [summary, Text(""), table]
+    renderables: list[RenderableType] = [summary, table]
     detail = _observation_detail_line(
         group,
         subjects,
@@ -1042,33 +1225,25 @@ def _observation_body(
         displayed_locations,
         index,
         report_path,
+        interactive=interactive,
     )
     if detail is not None:
-        renderables.extend((Text(""), detail))
+        renderables.append(detail)
     shortened = sum(
         bool(observation["snippet_truncated"]) for observation in group.observations
     )
     if shortened:
-        renderables.extend(
-            (
-                Text(""),
-                Text(
-                    f"{_count(shortened, 'retained snippet')} shortened by the "
-                    "report limit.",
-                    style="dim",
-                ),
+        renderables.append(
+            Text(
+                f"{_count(shortened, 'saved snippet')} shortened by the report "
+                "limit. Expansion cannot restore the omitted snippet text.",
+                style="dim",
             )
         )
-    return Group(*renderables)
+    return _spaced_group(renderables)
 
 
-def _print_findings(
-    console: Console,
-    index: _ReportIndex,
-    *,
-    report_path: Path | None,
-    show_all: bool,
-) -> int:
+def _finding_groups(index: _ReportIndex) -> list[_ObservationGroup]:
     groups: list[_ObservationGroup] = []
     for rule_id in ("archive.structure", "python.absolute-path"):
         observations = [
@@ -1077,46 +1252,52 @@ def _print_findings(
             if observation["kind"] == "finding"
         ]
         groups.extend(_observation_groups(observations, rule_id))
-    if not groups:
-        _print_band(console, "Findings", _PALETTE.finding_band)
-        console.print("No artifact findings reported.")
-        return 0
-
-    total = sum(len(group.observations) for group in groups)
-    _print_band(console, "Findings", _PALETTE.finding_band)
-    console.print(Text(_count(total, "artifact finding"), style="bold"))
-    for group in groups:
-        body = _observation_body(
-            group,
-            index,
-            action=None,
-            report_path=report_path,
-            show_all=show_all,
-        )
-        explanation = _FINDING_EXPLANATIONS.get(group.rule_id)
-        if explanation is not None:
-            body = Group(Text(explanation), Text(""), body)
-        console.print(
-            Panel(
-                body,
-                title=_CONDITION_TITLES.get(
-                    group.condition_code, _humanize_code(group.condition_code)
-                ),
-                title_align="left",
-                border_style=_PALETTE.finding_border,
-                expand=True,
-            )
-        )
-    return total
+    return groups
 
 
-def _print_review(
-    console: Console,
+def _finding_sections(
+    groups: list[_ObservationGroup],
     index: _ReportIndex,
     *,
     report_path: Path | None,
     show_all: bool,
-) -> int:
+    interactive: bool,
+) -> Group:
+    renderables: list[RenderableType] = []
+    for group in groups:
+        body: list[RenderableType] = []
+        explanation = _FINDING_EXPLANATIONS.get(group.rule_id)
+        if explanation is not None:
+            body.append(Text(explanation))
+        body.append(
+            _observation_body(
+                group,
+                index,
+                report_path=report_path,
+                show_all=show_all,
+                interactive=interactive,
+            )
+        )
+        renderables.append(
+            Panel(
+                _spaced_group(body),
+                title=Text(
+                    _CONDITION_TITLES.get(
+                        group.condition_code, _humanize_code(group.condition_code)
+                    )
+                ),
+                title_align="left",
+                border_style=_PALETTE.box_border,
+                padding=(0, 1),
+                expand=True,
+            )
+        )
+    return _spaced_group(renderables)
+
+
+def _review_categories(
+    index: _ReportIndex,
+) -> list[tuple[_ReviewSpec, list[_ObservationGroup]]]:
     categories: list[tuple[_ReviewSpec, list[_ObservationGroup]]] = []
     for spec in _REVIEW_SPECS:
         observations = [
@@ -1127,32 +1308,27 @@ def _print_review(
         groups = _observation_groups(observations, spec.rule_id)
         if groups:
             categories.append((spec, groups))
-    if not categories:
-        _print_band(console, "Needs review", _PALETTE.review_band)
-        console.print("No review items reported.")
-        return 0
+    return categories
 
-    total = sum(
-        len(group.observations) for _spec, groups in categories for group in groups
-    )
-    _print_band(console, "Needs review", _PALETTE.review_band)
-    console.print(
-        Text(
-            f"{_count(total, 'review item')} in "
-            f"{_count(len(categories), 'category', 'categories')}",
-            style="bold",
-        )
-    )
+
+def _review_sections(
+    categories: list[tuple[_ReviewSpec, list[_ObservationGroup]]],
+    index: _ReportIndex,
+    *,
+    report_path: Path | None,
+    show_all: bool,
+    interactive: bool,
+) -> Group:
+    renderables: list[RenderableType] = []
     for spec, groups in categories:
         action = Table.grid(padding=(0, 2))
-        action.add_column(style="bold")
+        action.add_column(style=f"bold {_PALETTE.attention}", no_wrap=True)
         action.add_column(ratio=1, overflow="fold")
-        action.add_row("Action", spec.action)
-        renderables: list[RenderableType] = [action]
+        action.add_row("Question", spec.action)
+        content: list[RenderableType] = [action]
         for group in groups:
-            renderables.append(Text(""))
             if spec.rule_id == "python.dependencies" or len(groups) > 1:
-                renderables.append(
+                content.append(
                     Text(
                         _CONDITION_TITLES.get(
                             group.condition_code,
@@ -1161,35 +1337,484 @@ def _print_review(
                         style="bold",
                     )
                 )
-            renderables.append(
+            content.append(
                 _observation_body(
                     group,
                     index,
-                    action=None,
                     report_path=report_path,
                     show_all=show_all,
+                    interactive=interactive,
                 )
             )
-        console.print(
+        renderables.append(
             Panel(
-                Group(*renderables),
-                title=spec.title,
+                _spaced_group(content),
+                title=Text(spec.title),
                 title_align="left",
-                border_style=_PALETTE.review_border,
+                border_style=_PALETTE.box_border,
+                padding=(0, 1),
                 expand=True,
             )
         )
-    return total
+    return _spaced_group(renderables)
 
 
-def _print_report_reference(console: Console, report_path: Path) -> None:
-    _print_band(console, "Saved report", _PALETTE.content_band)
+def _measurements(rows: list[tuple[str, object]]) -> Table:
+    table = Table.grid(expand=True, padding=(0, 2))
+    table.add_column(style="bold", no_wrap=True)
+    table.add_column(ratio=1, overflow="fold")
+    for label, value in rows:
+        rendered: RenderableType
+        if isinstance(value, int):
+            rendered = Text(str(value), style="bold")
+        elif isinstance(value, (Text, Group, Table)):
+            rendered = value
+        else:
+            rendered = _terminal_text(value)
+        table.add_row(label, rendered)
+    return table
+
+
+def _report_reference(
+    report_path: Path,
+    *,
+    interactive: bool,
+    show_all: bool,
+) -> Panel:
     rows = Table.grid(padding=(0, 2))
-    rows.add_column(style="bold")
+    rows.add_column(style="bold", no_wrap=True)
     rows.add_column(ratio=1, overflow="fold")
-    rows.add_row("Path", _terminal_text(report_path))
-    rows.add_row("More detail", "Add --all to the view command.")
-    console.print(rows)
+    rows.add_row("Path", _terminal_text(report_path, _PALETTE.location))
+    if interactive:
+        instruction = (
+            "Press a to return to compact detail for this artifact."
+            if show_all
+            else "Press a to show all saved detail for this artifact."
+        )
+    else:
+        instruction = "Add --all to the view command."
+    rows.add_row("More detail", instruction)
+    return Panel(
+        rows,
+        title=Text("Saved report reference"),
+        title_align="left",
+        border_style=_PALETTE.box_border,
+        padding=(0, 1),
+        expand=True,
+    )
+
+
+class ReportPresentation:
+    """Interpret one admitted checker document for plain and interactive output."""
+
+    def __init__(
+        self,
+        report: dict[str, object],
+        *,
+        report_path: Path | None = None,
+        interactive: bool = False,
+    ) -> None:
+        self.report_path = report_path
+        self.interactive = interactive
+        self._index = _index_report(cast(_Record, report))
+        self._coverage = _coverage_groups(self._index)
+        self._findings = _finding_groups(self._index)
+        self._reviews = _review_categories(self._index)
+
+    @property
+    def artifact_name(self) -> str:
+        artifact = cast(_Record, self._index.report["artifact"])
+        return cast(str, artifact["display_name"])
+
+    @staticmethod
+    def section_spec(key: SectionKey) -> SectionSpec:
+        return _SECTION_BY_KEY[key]
+
+    def _ordinary_coverage(self, field_name: str) -> list[_CoverageGroup]:
+        return [
+            group
+            for group in self._coverage
+            if group.field_name == field_name
+            and group.reason not in _LIMIT_REASON_NAMES
+        ]
+
+    def _coverage_measurements(
+        self,
+        groups: list[_CoverageGroup],
+    ) -> Table:
+        locations = {
+            _location_key(record, self._index)
+            for group in groups
+            for record in group.records
+        }
+        return _measurements(
+            [
+                ("Recorded reasons", len(groups)),
+                ("Affected locations", len(locations)),
+            ]
+        )
+
+    def _rule_status_text(self, rule_ids: tuple[str, ...]) -> Text | None:
+        by_rule = {
+            cast(str, result["rule_id"]): cast(str, result["status"])
+            for result in self._index.results
+        }
+        if rule_ids and all(by_rule.get(rule_id) == "complete" for rule_id in rule_ids):
+            return Text("The contributing checks are recorded as complete.")
+
+        labels = {
+            "error": "recorded inspection errors",
+            "partial": "partial recorded coverage",
+            "unsupported": "unsupported input",
+            "not_applicable": "not applicable",
+            "absent": "no recorded result",
+        }
+        clauses: list[str] = []
+        for status in ("error", "partial", "unsupported", "not_applicable", "absent"):
+            matching = [
+                _RULE_TITLES.get(rule_id, rule_id)
+                for rule_id in rule_ids
+                if by_rule.get(rule_id, "absent") == status
+            ]
+            if matching:
+                clauses.append(f"{', '.join(matching)}: {labels[status]}.")
+        return Text(" ".join(clauses)) if clauses else None
+
+    def _report_qualifiers(self) -> list[str]:
+        qualifiers: list[str] = []
+        artifact = cast(_Record, self._index.report["artifact"])
+        inventory = cast(_Record, self._index.report["inventory"])
+        limits = cast(_Record, self._index.report["limits"])
+        reached = set(cast(list[str], limits["reached"]))
+        if not artifact["snapshot_complete"]:
+            qualifiers.append("The input snapshot is incomplete.")
+        inventory_status = cast(str, inventory["status"])
+        inventory_clauses = {
+            "partial": "The saved inventory is partial.",
+            "error": "The inventory records an error.",
+            "unsupported": "The input format is unsupported for inventory.",
+        }
+        if inventory_status in inventory_clauses:
+            qualifiers.append(inventory_clauses[inventory_status])
+        if reached - {"max_observations", "max_report_bytes"}:
+            qualifiers.append("Recorded limits affected inspection.")
+        if reached & {"max_observations", "max_report_bytes"}:
+            qualifiers.append(
+                "Recorded limits restricted saved detail and may also have stopped "
+                "inspection."
+            )
+        return qualifiers
+
+    def _artifact_summary(self) -> Text:
+        artifact = cast(_Record, self._index.report["artifact"])
+        kind = cast(str, artifact["detected_kind"])
+        clauses = [
+            (
+                "The input snapshot is complete."
+                if artifact["snapshot_complete"]
+                else (
+                    "The input snapshot is incomplete; the recorded size does not "
+                    "establish a complete copy."
+                )
+            )
+        ]
+        if kind.startswith("unsupported_"):
+            clauses.append("This top-level format is not supported by checker v1.")
+        elif kind == "unclassified":
+            clauses.append("The report does not classify the input format.")
+        return Text(" ".join(clauses))
+
+    def _content_summary(self) -> Text:
+        inventory = cast(_Record, self._index.report["inventory"])
+        clauses = ["Counts describe saved report records."]
+        if inventory["status"] == "complete":
+            clauses.append("The inventory is recorded as complete.")
+        clauses.extend(self._report_qualifiers())
+        return Text(" ".join(dict.fromkeys(clauses)))
+
+    def _incomplete_summary(self, key: SectionKey) -> RenderableType:
+        field_name = "skipped_inputs" if key == "skipped" else "failed_inputs"
+        groups = self._ordinary_coverage(field_name)
+        if not groups:
+            base = (
+                "No skipped-input records are shown on this page."
+                if key == "skipped"
+                else "No failed-input records are shown on this page."
+            )
+            clauses = [base]
+        else:
+            clauses = []
+        limit_groups = [
+            group
+            for group in self._coverage
+            if group.field_name == field_name and group.reason in _LIMIT_REASON_NAMES
+        ]
+        reached = set(
+            cast(list[str], cast(_Record, self._index.report["limits"])["reached"])
+        )
+        if limit_groups:
+            if any(
+                not any(
+                    group.reason in _LIMIT_REASONS.get(limit, set())
+                    for limit in reached
+                )
+                for group in limit_groups
+            ):
+                clauses.append(
+                    "Limit-related coverage records exist without a matching "
+                    "reached-limit entry."
+                )
+            else:
+                clauses.append("Limit-related gaps are listed under Limits reached.")
+        if key == "skipped" and any(
+            group.reason.startswith("unsupported") for group in groups
+        ):
+            clauses.append("Unsupported content is included here as an inspection gap.")
+        if (
+            key == "failed"
+            and groups
+            and any(
+                observation["condition_code"] != "resource_limit_reached"
+                for observations in self._index.observations_by_rule.values()
+                for observation in observations
+            )
+        ):
+            clauses.append("Other saved observations remain available.")
+        qualifiers = self._report_qualifiers()
+        clauses.extend(qualifiers)
+        text = Text(" ".join(dict.fromkeys(clauses))) if clauses else None
+        if not groups:
+            assert text is not None
+            return text
+        parts: list[RenderableType] = [self._coverage_measurements(groups)]
+        if text is not None:
+            parts.append(text)
+        return _spaced_group(parts)
+
+    def _limits_summary(self) -> RenderableType:
+        limits = cast(_Record, self._index.report["limits"])
+        reached = cast(list[str], limits["reached"])
+        unmatched = [
+            group
+            for group in self._coverage
+            if group.reason in _LIMIT_REASON_NAMES
+            and not any(
+                group.reason in _LIMIT_REASONS.get(limit, set()) for limit in reached
+            )
+        ]
+        if not reached:
+            message = "No reached limits are recorded."
+            if unmatched:
+                message += (
+                    " Limit-related coverage records exist without a matching "
+                    "reached-limit entry."
+                )
+            return Text(message)
+        titles = Text()
+        for position, limit in enumerate(reached):
+            if position:
+                titles.append(", ")
+            titles.append(_LIMIT_TITLES.get(limit, limit), style=_PALETTE.attention)
+        rows: list[tuple[str, object]] = [
+            ("Reached limits", len(reached)),
+            ("Recorded", titles),
+        ]
+        clauses: list[str] = []
+        if set(reached) - {"max_observations", "max_report_bytes"}:
+            clauses.append("These bounds restricted inspection.")
+        if set(reached) & {"max_observations", "max_report_bytes"}:
+            clauses.append(
+                "Saved detail is bounded; expansion cannot recover omitted records."
+            )
+        if unmatched:
+            clauses.append(
+                "Limit-related coverage records exist without a matching "
+                "reached-limit entry."
+            )
+        parts: list[RenderableType] = [_measurements(rows)]
+        if clauses:
+            parts.append(Text(" ".join(clauses)))
+        return _spaced_group(parts)
+
+    def _findings_summary(self) -> RenderableType:
+        total = sum(len(group.observations) for group in self._findings)
+        parts: list[RenderableType] = []
+        if self._findings:
+            parts.append(
+                _measurements(
+                    [
+                        ("Artifact findings", total),
+                        ("Condition groups", len(self._findings)),
+                    ]
+                )
+            )
+        else:
+            parts.append(
+                Text(
+                    "No artifact findings are reported. This is not a correctness "
+                    "or reproducibility verdict."
+                )
+            )
+        status = self._rule_status_text(("archive.structure", "python.absolute-path"))
+        if status is not None:
+            parts.append(status)
+        parts.extend(Text(clause) for clause in self._report_qualifiers())
+        return _spaced_group(parts)
+
+    def _review_summary(self) -> RenderableType:
+        total = sum(
+            len(group.observations)
+            for _review_spec, groups in self._reviews
+            for group in groups
+        )
+        parts: list[RenderableType] = []
+        if self._reviews:
+            parts.append(
+                _measurements(
+                    [
+                        ("Review items", total),
+                        ("Categories", len(self._reviews)),
+                    ]
+                )
+            )
+        else:
+            parts.append(
+                Text(
+                    "No review items are reported. This does not establish that no "
+                    "human review is needed."
+                )
+            )
+        status = self._rule_status_text(
+            tuple(review_spec.rule_id for review_spec in _REVIEW_SPECS)
+        )
+        if status is not None:
+            parts.append(status)
+        parts.extend(Text(clause) for clause in self._report_qualifiers())
+        return _spaced_group(parts)
+
+    def _saved_summary(self) -> Text:
+        if self.report_path is None:
+            line = Text("No saved-report path was supplied to this view. ")
+        else:
+            line = Text("This view reads the saved report at ")
+            line.append_text(_terminal_text(self.report_path, _PALETTE.location))
+            line.append(", not the original input. ")
+        line.append(
+            "Expansion shows only saved detail; it does not repeat inspection or "
+            "recover omitted content."
+        )
+        return line
+
+    def _summary(self, key: SectionKey) -> RenderableType:
+        if key == "artifact":
+            return self._artifact_summary()
+        if key == "content":
+            return self._content_summary()
+        if key in {"skipped", "failed"}:
+            return self._incomplete_summary(key)
+        if key == "limits":
+            return self._limits_summary()
+        if key == "findings":
+            return self._findings_summary()
+        if key == "review":
+            return self._review_summary()
+        return self._saved_summary()
+
+    def _body(self, key: SectionKey, *, show_all: bool) -> list[RenderableType]:
+        if key == "artifact":
+            return [_identity_panel(self._index)]
+        if key == "content":
+            return [_content_panel(self._index)]
+        if key in {"skipped", "failed"}:
+            field_name = "skipped_inputs" if key == "skipped" else "failed_inputs"
+            return [
+                _incomplete_section(
+                    self._coverage,
+                    self._index,
+                    field_name,
+                    report_path=self.report_path,
+                    show_all=show_all,
+                    interactive=self.interactive,
+                )
+            ]
+        if key == "limits":
+            return [
+                _limit_sections(
+                    self._coverage,
+                    self._index,
+                    report_path=self.report_path,
+                    show_all=show_all,
+                    interactive=self.interactive,
+                )
+            ]
+        if key == "findings":
+            return [
+                _finding_sections(
+                    self._findings,
+                    self._index,
+                    report_path=self.report_path,
+                    show_all=show_all,
+                    interactive=self.interactive,
+                )
+            ]
+        if key == "review":
+            return [
+                _review_sections(
+                    self._reviews,
+                    self._index,
+                    report_path=self.report_path,
+                    show_all=show_all,
+                    interactive=self.interactive,
+                )
+            ]
+        if self.report_path is None:
+            return []
+        return [
+            _report_reference(
+                self.report_path,
+                interactive=self.interactive,
+                show_all=show_all,
+            )
+        ]
+
+    def render_section(
+        self,
+        key: SectionKey,
+        *,
+        show_all: bool = False,
+    ) -> Group:
+        """Render one stable report section without a page heading."""
+
+        spec = self.section_spec(key)
+        return _spaced_group(
+            [
+                Text(spec.meaning),
+                _summary_block(self._summary(key)),
+                *self._body(key, show_all=show_all),
+            ]
+        )
+
+
+def build_report(
+    report: dict[str, object],
+    *,
+    report_path: Path | None = None,
+    show_all: bool = False,
+) -> Group:
+    """Build one completed report from the same sections used by the viewer."""
+
+    presentation = ReportPresentation(report, report_path=report_path)
+    return _spaced_group(
+        [
+            _spaced_group(
+                [
+                    _section_heading(spec),
+                    presentation.render_section(spec.key, show_all=show_all),
+                ]
+            )
+            for spec in SECTION_SPECS
+        ]
+    )
 
 
 def render_report(
@@ -1201,45 +1826,4 @@ def render_report(
 ) -> None:
     """Render one completed schema document without inspecting its source."""
 
-    index = _index_report(cast(_Record, report))
-    coverage = _coverage_groups(index)
-
-    _print_identity(console, index)
-    _print_band(console, "Content analyzed", _PALETTE.content_band)
-    console.print(
-        Panel(
-            _content_panel(index),
-            title="Artifact contents",
-            title_align="left",
-            border_style=_PALETTE.content_border,
-            expand=True,
-        )
-    )
-    _print_incomplete_sections(
-        console,
-        coverage,
-        index,
-        report_path=report_path,
-        show_all=show_all,
-    )
-    _print_limits(
-        console,
-        coverage,
-        index,
-        report_path=report_path,
-        show_all=show_all,
-    )
-    _print_findings(
-        console,
-        index,
-        report_path=report_path,
-        show_all=show_all,
-    )
-    _print_review(
-        console,
-        index,
-        report_path=report_path,
-        show_all=show_all,
-    )
-    if report_path is not None:
-        _print_report_reference(console, report_path)
+    console.print(build_report(report, report_path=report_path, show_all=show_all))

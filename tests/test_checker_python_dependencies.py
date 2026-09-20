@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import stat
 import warnings
 import zipfile
@@ -753,7 +754,8 @@ def test_dependency_renderer_escapes_values_and_prints_relationships(
     report_validator.validate(report)
     output = _render(report)
     assert "Declarations without matching imports" in output
-    assert "1 review item in 1 category" in output
+    assert re.search(r"Review items\s+1", output)
+    assert re.search(r"Categories\s+1", output)
     assert "requirements.txt / line 1" in output
     assert "[bold]unsafe[/bold]\\u0007\\u202e" in output
     assert "evidence:0" not in output

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from .checker_render import _terminal_text, report_console
 from .checker_render import render_report as render_check_report
 from .checker_report import encode_report
 from .checker_types import CheckInputError
-from .checker_view import SavedReportError, load_saved_report
+from .checker_view import SavedReportError, collect_saved_reports, load_saved_report
 from .score import ArtifactReport, score_path
 
 console = Console()
@@ -70,26 +71,38 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     view = subcommands.add_parser(
         "view",
-        help="Display one saved checker JSON report.",
+        help="Browse or print saved checker JSON reports.",
         description=(
-            "Validate and display a saved checker v1 report without reopening or "
-            "inspecting the original artifact."
+            "Validate saved checker v1 reports without reopening or inspecting the "
+            "original artifacts. In a terminal, browse one report directly or "
+            "choose multiple reports from a searchable keyboard-only list. A "
+            "directory selects top-level JSON files and report.json files in its "
+            "immediate child directories."
         ),
         epilog="""Examples:
   reproready view report.json
-  reproready view report.json --all""",
+  reproready view first.json second.json
+  reproready view run-directory/
+  reproready view report.json --all
+  reproready view run-directory/ --plain""",
         formatter_class=formatter,
     )
     view.add_argument(
-        "path",
+        "paths",
+        nargs="+",
         type=Path,
-        metavar="REPORT.json",
-        help="Saved ReproReady checker v1 report.",
+        metavar="PATH",
+        help="Saved checker report file or shallow report directory.",
     )
     view.add_argument(
         "--all",
         action="store_true",
-        help="Display every retained location and useful linked evidence.",
+        help="Initially display every saved location and useful linked evidence.",
+    )
+    view.add_argument(
+        "--plain",
+        action="store_true",
+        help="Print selected reports sequentially instead of opening the browser.",
     )
 
     score = subcommands.add_parser(
@@ -358,7 +371,7 @@ def _run_check(path: Path, as_json: bool) -> int:
             file=sys.stderr,
         )
         return 2
-    except Exception:
+    except Exception:  # noqa: BLE001 - fixed CLI diagnostic boundary
         print(
             "reproready check: error: An internal failure prevented a checker "
             "report. (internal_error)",
@@ -368,29 +381,83 @@ def _run_check(path: Path, as_json: bool) -> int:
     return 0
 
 
-def _run_view(path: Path, show_all: bool) -> int:
+def _view_diagnostic(
+    error: SavedReportError,
+    *,
+    index: int | None = None,
+) -> None:
+    prefix = "reproready view"
+    if index is not None:
+        prefix += f": report {index + 1}"
+    print(f"{prefix}: error: {error.message} ({error.code})", file=sys.stderr)
+
+
+def _internal_view_error() -> SavedReportError:
+    return SavedReportError(
+        "internal_error",
+        "An internal failure prevented the saved report from being displayed.",
+    )
+
+
+def _plain_view(paths: list[Path], show_all: bool) -> int:
+    entries = collect_saved_reports(paths)
+    multiple = len(entries) > 1
+    status = 0
+    output = report_console()
+    for index, entry in enumerate(entries):
+        try:
+            if entry.error is not None:
+                raise entry.error
+            report = load_saved_report(entry.path)
+            render_check_report(
+                report,
+                output,
+                report_path=entry.path,
+                show_all=show_all,
+            )
+        except SavedReportError as error:
+            _view_diagnostic(error, index=index if multiple else None)
+            if status == 0:
+                status = 2
+        except Exception:  # noqa: BLE001 - fixed CLI diagnostic boundary
+            _view_diagnostic(_internal_view_error(), index=index if multiple else None)
+            status = 1
+    return status
+
+
+def _run_view(paths: list[Path], show_all: bool, plain: bool) -> int:
+    interactive = (
+        not plain
+        and sys.stdin.isatty()
+        and sys.stdout.isatty()
+        and os.environ.get("TERM") != "dumb"
+    )
+    if not interactive:
+        try:
+            return _plain_view(paths, show_all)
+        except Exception:  # noqa: BLE001 - fixed CLI diagnostic boundary
+            _view_diagnostic(_internal_view_error())
+            return 1
+
     try:
-        report = load_saved_report(path)
-        render_check_report(
-            report,
-            report_console(),
-            report_path=path,
-            show_all=show_all,
-        )
-    except SavedReportError as error:
-        print(
-            f"reproready view: error: {error.message} ({error.code})",
-            file=sys.stderr,
-        )
-        return 2
-    except Exception:
-        print(
-            "reproready view: error: An internal failure prevented the saved report "
-            "from being displayed. (internal_error)",
-            file=sys.stderr,
-        )
+        from .checker_tui import ReportBrowserApp
+
+        entries = collect_saved_reports(paths)
+        app = ReportBrowserApp(entries, show_all=show_all)
+        result = app.run(mouse=False)
+    except KeyboardInterrupt:
+        return 130
+    except Exception:  # noqa: BLE001 - fixed CLI diagnostic boundary
+        _view_diagnostic(_internal_view_error())
         return 1
-    return 0
+
+    multiple = len(entries) > 1
+    for index, error in sorted(app.report_errors.items()):
+        _view_diagnostic(error, index=index if multiple else None)
+    if isinstance(result, int):
+        return result
+    _view_diagnostic(_internal_view_error())
+    return 1
 
 
 def _score_path_error(path: Path) -> None:
@@ -404,7 +471,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "check":
         return _run_check(args.path, args.json)
     if args.cmd == "view":
-        return _run_view(args.path, args.all)
+        return _run_view(args.paths, args.all, args.plain)
 
     reports: list[ArtifactReport] = []
     for path in args.paths:

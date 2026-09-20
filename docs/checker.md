@@ -20,32 +20,35 @@ uv add 'reproready @ git+https://github.com/adbX/reproready.git@v0.2.0'
 
 ## Command-line interface
 
-Pass exactly one file path to `check`. Use `--json` to save the complete machine-readable report. Use `view` to validate and display a saved report without reopening the original artifact:
+Pass exactly one file path to `check`. Use `--json` to save the complete machine-readable report. Use `view` to validate and browse one or more saved reports without reopening their original artifacts:
 
 ```sh
 reproready check artifact.zip
 reproready check artifact.zip --json > report.json
-reproready view report.json
-reproready view report.json --all
+reproready view report.json another-report.json
+reproready view saved-run/
+reproready view saved-run/ --plain --all
 ```
 
-Terminal output is noninteractive and adapts to terminal width. Redirected output is plain text; `NO_COLOR` disables styling. Meaning never depends on color. `check` does not save implicitly, and the viewer accepts checker schema-v1 reports rather than score JSON.
+`check` output is noninteractive and adapts to terminal width. In a terminal, one supplied report opens on its Artifact page; multiple reports open in a searchable full-screen list. Every admitted report has eight stable pages: Artifact, Content analyzed, Limits reached, Checks skipped, Checks failed, Findings, Needs review, and Saved report. Wide terminals show named tabs. Narrow terminals show the current page, its position among eight pages, and the `s` page-menu key.
+
+The viewer is keyboard-only and does not enable terminal mouse reporting. Left and Right change pages, `[` and `]` change reports, `s` opens the page menu, and Escape returns to the report list. Up and Down scroll the current page; PgUp and PgDn scroll by a viewport; Home and End move within that page. In lists, Up and Down move the selection, Enter opens it, `/` focuses saved-report search, and Escape leaves search before returning. `a` toggles all saved detail for the current report, `?` shows every key, and `q` quits. The footer groups page and report pairs and wraps complete shortcut hints instead of hiding them at narrow widths. Redirected output and `view --plain` print reports sequentially without waiting for input. `NO_COLOR` disables styling, and labels, position, and selection remain sufficient without color. `check` does not save implicitly, and the viewer accepts checker schema-v1 reports rather than score JSON.
 
 ## Interpreting output
 
-Read skipped checks, failed checks, and reached limits before interpreting findings. The display identifies the artifact and separates analyzed files, folders, Python files, notebooks, code cells, and dependency files where those units exist.
+Read Limits reached, Checks skipped, and Checks failed before interpreting findings. Each page states its purpose, shows a summary grounded in saved report records, and then shows its evidence groups. Counts use labeled values or tables. The Content analyzed page keeps archive entries, source files, notebook documents, notebook cells, and dependency records as separate units. Teal identifies navigation and the current artifact; amber marks review questions and reached limits; red marks recorded non-limit inspection failures; and blue marks saved source locations.
 
-`Findings` reports observed archive or path conditions. `Needs review` can contain nine subject boxes: Dependencies, Python search paths, Download comments, Files inside archives, CSV files, Notebook setup, Download identifiers, User input, and Cloud storage. Each nonempty box states an action and shows source locations. Dependencies retains unmatched imports and unmatched declarations as different conditions.
+`Findings` reports observed archive or path conditions. `Needs review` can contain nine subject boxes: Dependencies, Python search paths, Download comments, Files inside archives, CSV files, Notebook setup, Download identifiers, User input, and Cloud storage. Each nonempty box asks a question and shows saved source locations. Dependencies retains unmatched imports and unmatched declarations as different conditions.
 
-The compact view shows at most three distinct names or items per condition in deterministic report order. It preserves nested containers, duplicate-entry ordinals, notebook cells, source lines, and useful linked evidence. An omission notice distinguishes detail hidden by the display from shortened snippets and content that was not inspected. `view --all` displays every retained location and useful linked record.
+The compact view shows at most three distinct names or items per condition in deterministic report order. It preserves nested containers, duplicate-entry ordinals, notebook cells, source lines, and useful linked evidence. An omission notice distinguishes detail hidden by the display from shortened snippets and content that was not inspected. `view --all` starts every report with all saved detail visible; `a` changes the current report during an interactive session. Vertical scrolling stays with the selected page, and each report remembers its page, detail mode, and reading position while the viewer remains open.
 
-Findings and review items require context before a decision. [Rule statuses](checker-ruleset-v1.md#shared-coverage-semantics) describe inspection coverage, not whether an artifact passes. Empty Findings and Needs review sections do not prove that code is correct, reproducible, or free of an uninspected condition.
+All eight pages remain available when a page has no saved records. An empty Findings or Needs review page reports only that no corresponding items are saved; it does not prove that code is correct, reproducible, free of an uninspected condition, or already reviewed. [Rule statuses](checker-ruleset-v1.md#shared-coverage-semantics) describe inspection coverage, not whether an artifact passes.
 
 ### JSON output and saved reports
 
 `check --json` writes exactly one compact schema-valid object followed by a newline, with no diagnostic on standard error for a valid report. It includes all retained artifact, runtime, limit, inventory, source, evidence, observation, coverage, and relationship records. Ordinary imports, standard-library classifications, and dependency declarations remain available here even when omitted from the compact terminal display.
 
-`view` accepts one regular, non-symbolic-link file of at most 128 MiB. This bound admits new compact output and older pretty-printed schema-v1 reports under the limit. The command uses strict UTF-8 and JSON decoding, rejects non-finite numbers, validates the packaged schema and cross-record references, and never fetches a schema or artifact. A valid saved report remains viewable after the original artifact changes or disappears.
+`view` accepts explicit report paths and directories. A directory selects case-insensitive top-level `.json` files plus an exact `report.json` in each immediate real child directory, in deterministic path order; selection does not recurse or follow directory links. Each report must be one regular, non-symbolic-link file of at most 128 MiB. The command admits compact output and older pretty-printed schema-v1 reports under that limit, uses strict UTF-8 and JSON decoding, rejects non-finite numbers, validates the packaged schema and cross-record references, and never fetches a schema or artifact. Invalid selected files remain unchanged and do not prevent navigation to valid reports. A valid saved report remains viewable after the original artifact changes or disappears.
 
 The [JSON Schema](../src/reproready/schemas/check-report-v1.schema.json) defines the full report. The checker does not produce HTML, JSON Lines, batch manifests, or a second artifact inventory.
 

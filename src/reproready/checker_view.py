@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import stat
+from collections.abc import Sequence
+from dataclasses import dataclass
 from functools import cache
 from importlib import resources
 from pathlib import Path
@@ -28,6 +30,92 @@ class SavedReportError(ValueError):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+@dataclass(frozen=True, slots=True)
+class SavedReportEntry:
+    """One selected saved-report path or collection-selection error."""
+
+    path: Path
+    error: SavedReportError | None = None
+
+
+def _absolute_path(path: Path) -> Path:
+    return path.expanduser().absolute()
+
+
+def _directory_candidates(
+    directory: Path,
+) -> tuple[list[Path], SavedReportError | None]:
+    try:
+        children = list(directory.iterdir())
+    except OSError:
+        return [], SavedReportError(
+            "report_directory_unreadable",
+            "The saved report directory could not be read.",
+        )
+
+    candidates = [child for child in children if child.suffix.casefold() == ".json"]
+    for child in children:
+        try:
+            child_status = child.lstat()
+        except OSError:
+            continue
+        if not stat.S_ISDIR(child_status.st_mode):
+            continue
+        report_path = child / "report.json"
+        try:
+            report_path.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            pass
+        candidates.append(report_path)
+
+    candidates.sort(key=lambda candidate: candidate.relative_to(directory).as_posix())
+    if candidates:
+        return candidates, None
+    return [], SavedReportError(
+        "no_reports_found",
+        "No saved report files were found in the selected directory.",
+    )
+
+
+def collect_saved_reports(paths: Sequence[Path]) -> list[SavedReportEntry]:
+    """Expand explicit reports and shallow report directories deterministically."""
+
+    entries: list[SavedReportEntry] = []
+    seen_inputs: set[Path] = set()
+    seen_entries: set[Path] = set()
+    for supplied in paths:
+        path = _absolute_path(supplied)
+        if path in seen_inputs:
+            continue
+        seen_inputs.add(path)
+
+        try:
+            status = path.lstat()
+        except OSError:
+            status = None
+        if status is None or not stat.S_ISDIR(status.st_mode):
+            if path not in seen_entries:
+                entries.append(SavedReportEntry(path))
+                seen_entries.add(path)
+            continue
+
+        candidates, error = _directory_candidates(path)
+        if error is not None:
+            if path not in seen_entries:
+                entries.append(SavedReportEntry(path, error))
+                seen_entries.add(path)
+            continue
+        for candidate in candidates:
+            normalized = _absolute_path(candidate)
+            if normalized in seen_entries:
+                continue
+            entries.append(SavedReportEntry(normalized))
+            seen_entries.add(normalized)
+    return entries
 
 
 def _read_regular_file(path: Path) -> bytes:

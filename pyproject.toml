@@ -17,13 +17,15 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 
-# The score modules are standard-library only. `rich` is used solely by the CLI
-# renderer; `anthropic` (the `llm` extra) solely by the optional Validation call.
-# Checker-only dependencies stay outside the score pipeline.
+# The score modules are standard-library only. `rich` and `textual` support the
+# CLI renderer and interactive saved-report browser; `anthropic` (the `llm`
+# extra) is used solely by the optional Validation call. Checker-only
+# dependencies stay outside the score pipeline.
 dependencies = [
     "packaging>=24.0",
     "jsonschema>=4.23",
     "rich>=13.0",
+    "textual>=8.2.8",
     "tomli>=2.0; python_version < '3.11'",
 ]
 

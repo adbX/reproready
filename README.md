@@ -21,11 +21,12 @@ Pass one ZIP archive or a [supported Python, notebook, or dependency file](docs/
 ```sh
 reproready check artifact.zip
 reproready check artifact.zip --json > report.json
-reproready view report.json
-reproready view report.json --all
+reproready view report.json another-report.json
+reproready view saved-run/
+reproready view saved-run/ --plain --all
 ```
 
-The terminal report separates analyzed content, incomplete checks, findings, and items needing review. `check --json` writes one compact saved report. `view` validates and displays that report without reopening the artifact; `--all` expands every retained location and useful linked evidence.
+The terminal report separates the same eight stable pages: Artifact, Content analyzed, Limits reached, Checks skipped, Checks failed, Findings, Needs review, and Saved report. `check --json` writes one compact saved report. In a terminal, `view` opens one report directly or starts multiple reports in a searchable full-screen list without reopening their artifacts. Left and Right change pages, `[` and `]` change reports, `s` opens the page menu, Escape returns to the list, `a` toggles all saved detail, `?` shows every key, and `q` quits. The viewer is keyboard-only and does not enable terminal mouse reporting. Its shortcut footer keeps paired page and report keys together and wraps whole hints on narrow terminals. Up and Down, PgUp and PgDn, and Home and End scroll only the current page. A directory selects top-level JSON files plus `report.json` in immediate child directories. Redirected output and `--plain` print the selected reports sequentially.
 
 ## Documentation
 

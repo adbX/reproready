@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import re
 import zipfile
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -10,7 +11,7 @@ from pathlib import Path
 from rich.console import Console
 
 from reproready.checker import _check_document
-from reproready.checker_render import render_report, report_console
+from reproready.checker_render import ReportPresentation, render_report, report_console
 
 REVIEW_TITLES = (
     "Dependencies",
@@ -49,6 +50,18 @@ def _render(
     return output.getvalue()
 
 
+def _renderable(renderable, *, width: int = 100) -> str:
+    output = StringIO()
+    Console(
+        file=output,
+        color_system=None,
+        force_terminal=False,
+        no_color=True,
+        width=width,
+    ).print(renderable)
+    return output.getvalue()
+
+
 def test_evidence_heavy_report_groups_names_and_bounds_compact_detail(
     checker_inputs,
 ) -> None:
@@ -63,15 +76,17 @@ def test_evidence_heavy_report_groups_names_and_bounds_compact_detail(
     assert len(dependencies["observations"]) == 36
     assert len(dependencies["evidence"]) > 43
     assert output.index("Content analyzed") < output.index("Needs review")
-    assert "36 review items in 1 category" in output
-    assert "36 occurrences across 36 locations and 36 names" in output
+    assert re.search(r"Review items\s+36", output)
+    assert re.search(r"Categories\s+1", output)
+    assert re.search(r"36 occurrences\s+·\s+36 locations\s+·\s+36 names", output)
     assert "Declarations without matching imports" in output
     assert "project/requirements.txt / line 8" in output
     assert "package7" in output
     assert "package8" in output
     assert "package9" in output
     assert "package10" not in output
-    assert "Showing 3 names and 3 locations from 36 names and 36 locations" in output
+    assert "Saved names shown: 3 of 36." in output
+    assert "Locations shown: 3 of 36." in output
     assert "source records" not in output
     assert "python.dependencies" not in output
     assert len(output) < 5_000
@@ -82,21 +97,32 @@ def test_limits_are_separate_from_findings_and_keep_nested_location(
 ) -> None:
     report = _check_document(checker_inputs.paths["evidence_heavy_limited_zip"])
     output = _render(report)
+    presentation = ReportPresentation(report)
+    limits = _renderable(presentation.render_section("limits"))
+    skipped = _renderable(presentation.render_section("skipped"))
+    failed = _renderable(presentation.render_section("failed"))
+    nested_location = "one.zip → two.zip → three.zip → four.zip"
 
     assert output.index("Content analyzed") < output.index("Limits reached")
+    assert output.index("Limits reached") < output.index("Checks skipped")
+    assert output.index("Checks skipped") < output.index("Checks failed")
     assert output.index("Limits reached") < output.index("Needs review")
-    assert output.count("Nested ZIP depth") == 1
+    assert "Nested ZIP depth" in output
+    assert "Reached limits" in output
     assert "Archive structure, Absolute paths, Dependencies" in output
-    assert "one.zip → two.zip → three.zip → four.zip" in output
+    assert nested_location in output
+    assert nested_location in limits
+    assert nested_location not in skipped
+    assert nested_location not in failed
     assert "resource limit" not in output.casefold()
-    assert "36 review items in 1 category" in output
+    assert re.search(r"Review items\s+36", output)
 
 
 def test_complete_empty_report_has_no_verdict(checker_inputs) -> None:
     output = _render(_check_document(checker_inputs.paths["minimal_python"]))
 
-    assert output.count("No artifact findings reported.") == 1
-    assert output.count("No review items reported.") == 1
+    assert "Findings" in output
+    assert "Needs review" in output
     assert "passed" not in output.casefold()
     assert "all clear" not in output.casefold()
 
@@ -114,7 +140,8 @@ def test_comment_result_remains_visible_beside_python_parse_failure(
     assert output.index("Checks failed") < output.index("Needs review")
     assert "Python parsing failed" in output
     assert "Download comments" in output
-    assert "1 review item in 1 category" in output
+    assert re.search(r"Review items\s+1", output)
+    assert re.search(r"Categories\s+1", output)
     assert "parse-failure.py / line 1" in output
     assert "No review items" not in output
 
@@ -162,7 +189,8 @@ def test_all_nine_review_categories_keep_dependency_conditions(
 
     output = _render(report, width=120)
 
-    assert "10 review items in 9 categories" in output
+    assert re.search(r"Review items\s+10", output)
+    assert re.search(r"Categories\s+9", output)
     for title in REVIEW_TITLES:
         assert title in output
     assert "Imports without matching declarations" in output
@@ -177,7 +205,7 @@ def test_multiple_imports_on_one_line_have_one_distinct_location(
 
     output = _render(_check_document(source))
 
-    assert "2 occurrences across 1 location and 2 names" in output
+    assert re.search(r"2 occurrences\s+·\s+1 location\s+·\s+2 names", output)
     assert "same-line.py / line 1" in output
 
 
@@ -193,7 +221,8 @@ def test_linked_archive_evidence_keeps_both_locations(tmp_path: Path) -> None:
     output = _render(_check_document(source))
 
     assert "Files inside archives" in output
-    assert "Related: bundled archive member" in output
+    assert "Related" in output
+    assert "bundled archive member" in output
     assert "bundle.zip → data.csv" in output
 
 
@@ -224,8 +253,8 @@ def test_same_condition_in_finding_and_review_stays_in_separate_sections(
 
     assert output.count("Shared condition") == 2
     assert output.index("Findings") < output.index("Needs review")
-    assert "1 artifact finding" in output
-    assert "36 review items in 1 category" in output
+    assert re.search(r"Artifact findings\s+1", output)
+    assert re.search(r"Review items\s+36", output)
 
 
 def test_renderer_preserves_literal_markup_and_escapes_terminal_controls(

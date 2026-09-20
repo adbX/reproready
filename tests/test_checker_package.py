@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.metadata
 import importlib.resources
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -78,8 +79,9 @@ def test_documented_terminal_example_exposes_groups_counts_and_json_route() -> N
 
     assert result.returncode == 0
     assert result.stderr == ""
-    assert "1 artifact finding" in result.stdout
-    assert "2 review items in 2 categories" in result.stdout
+    assert re.search(r"Artifact findings\s+1", result.stdout)
+    assert re.search(r"Review items\s+2", result.stdout)
+    assert re.search(r"Categories\s+2", result.stdout)
     assert "POSIX absolute paths" in result.stdout
     assert "Python search paths" in result.stdout
     assert "Download comments" in result.stdout

@@ -67,7 +67,7 @@ Lists have these deterministic orders:
 
 JSON fields follow schema declaration order. Limit accounting uses compact UTF-8 JSON and rejects non-finite numbers. Indentation may change; list order does not.
 
-`reproready view` admits checker schema-v1 reports through a separate 128 MiB file bound. It accepts both compact and pretty-printed JSON under that bound, then applies the packaged schema and the reference checks above without reopening the artifact.
+For every file selected by `reproready view`, the viewer applies a separate 128 MiB bound, accepts compact or pretty-printed JSON under that bound, and applies the packaged schema and the reference checks above without reopening the artifact. Selecting several files or a shallow report directory does not change these per-report admission rules.
 
 ## Fixed limits
 
