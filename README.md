@@ -1,22 +1,36 @@
 # ReproReady
 
 [![CI](https://github.com/adbX/reproready/actions/workflows/ci.yml/badge.svg)](https://github.com/adbX/reproready/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/adbX/reproready/blob/v0.2.0/LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11--3.14-blue.svg)](https://github.com/adbX/reproready/blob/v0.2.0/pyproject.toml)
 
 ReproReady is a static checker for research artifacts that inspects code, data, and other files without running it. It reports observations about file paths, dependencies, and data access, with source locations and questions for review. ReproReady aims to assist a human replicator and does not reproduce results or try to predict whether code will run.
 
 ## Install
 
-Requires Python 3.10 or newer on macOS or Linux. Install with [uv](https://docs.astral.sh/uv/):
+Requires Python 3.11 or newer on macOS or Linux. Install the exact release with [uv](https://docs.astral.sh/uv/):
 
 ```sh
-uv tool install 'reproready @ git+https://github.com/adbX/reproready.git@v0.2.0'
+uv tool install 'reproready==0.2.0'
+```
+
+Alternatively, install it with pip in an isolated virtual environment:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install 'reproready==0.2.0'
+```
+
+For the Python API in a uv project, add the package as a project dependency:
+
+```sh
+uv add 'reproready==0.2.0'
 ```
 
 ## Check your code
 
-Pass one ZIP archive or a [supported Python, notebook, or dependency file](docs/checker.md#supported-inputs). Directories are not accepted.
+Pass one ZIP archive or a [supported Python, notebook, or dependency file](https://github.com/adbX/reproready/blob/v0.2.0/docs/checker.md#supported-inputs). Directories are not accepted.
 
 ```sh
 reproready check artifact.zip
@@ -30,13 +44,14 @@ The terminal report separates the same eight stable pages: Artifact, Content ana
 
 ## Documentation
 
-- [Checker guide](docs/checker.md): supported inputs, report interpretation, and inspection limits.
-- [Python API](docs/checker.md#python-api): use the checker from another Python project.
-- [Ruleset](docs/checker-ruleset-v1.md): what each check looks for and what it cannot determine.
-- [Worked example](docs/checker.md#worked-example): sample code and its report.
+- [Checker guide](https://github.com/adbX/reproready/blob/v0.2.0/docs/checker.md): supported inputs, report interpretation, and inspection limits.
+- [Python API](https://github.com/adbX/reproready/blob/v0.2.0/docs/checker.md#python-api): use the checker from another Python project.
+- [Ruleset](https://github.com/adbX/reproready/blob/v0.2.0/docs/checker-ruleset-v1.md): what each check looks for and what it cannot determine.
+- [Security policy](https://github.com/adbX/reproready/blob/v0.2.0/SECURITY.md): privately report vulnerabilities without posting sensitive artifacts publicly.
+- [Worked example](https://github.com/adbX/reproready/blob/v0.2.0/docs/checker.md#worked-example): sample code and its report.
 
 The package also includes a separate score command; see `reproready score --help`.
 
 ## License
 
-ReproReady is available under the [MIT License](LICENSE).
+ReproReady is available under the [MIT License](https://github.com/adbX/reproready/blob/v0.2.0/LICENSE).

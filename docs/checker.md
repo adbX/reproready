@@ -6,16 +6,24 @@ Version `0.2.0` uses report schema version `1` and the eleven-rule [`python-v1` 
 
 ## Installation
 
-Requires Python 3.10 or newer on macOS or Linux. Install the `v0.2.0` Git tag with [uv](https://docs.astral.sh/uv/):
+Requires Python 3.11 or newer on macOS or Linux. Install the exact release with [uv](https://docs.astral.sh/uv/):
 
 ```sh
-uv tool install 'reproready @ git+https://github.com/adbX/reproready.git@v0.2.0'
+uv tool install 'reproready==0.2.0'
+```
+
+Alternatively, install it with pip in an isolated virtual environment:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install 'reproready==0.2.0'
 ```
 
 To use the Python API in another uv project:
 
 ```sh
-uv add 'reproready @ git+https://github.com/adbX/reproready.git@v0.2.0'
+uv add 'reproready==0.2.0'
 ```
 
 ## Command-line interface

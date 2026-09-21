@@ -7,13 +7,20 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@94527f2e458b27549849d47d273a16bec83a01e9 # v6
+        with:
+          persist-credentials: false
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          enable-cache: false
       - name: ruff check
         run: uv run ruff check
       - name: ruff format --check
@@ -24,40 +31,66 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@94527f2e458b27549849d47d273a16bec83a01e9 # v6
+        with:
+          persist-credentials: false
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          enable-cache: false
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} pytest
 
   build-install:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@94527f2e458b27549849d47d273a16bec83a01e9 # v6
+        with:
+          persist-credentials: false
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          enable-cache: false
       - name: Build wheel and source distribution
-        run: uv build
-      - name: Install wheel and exercise public surfaces
+        run: uv build --no-sources
+      - name: Install each distribution and exercise public surfaces
         shell: bash
         run: |
           set -euo pipefail
-          uv venv --python 3.13 .ci-wheel
-          uv pip install --python .ci-wheel/bin/python dist/*.whl
+          repo_root=$PWD
           printf '%s\n' "open('/ci/input.csv')" > /tmp/checker-smoke.py
           mkdir /tmp/score-smoke
           printf '%s\n' "print('score smoke')" > /tmp/score-smoke/main.py
           printf '%s\n' "# Score smoke" > /tmp/score-smoke/README.md
-          env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN \
-            .ci-wheel/bin/python -c \
-            "import json; from importlib.resources import files; from reproready import check_path; json.loads(files('reproready').joinpath('schemas/check-report-v1.schema.json').read_text()); assert check_path('/tmp/checker-smoke.py').schema_version == '1'"
-          env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN \
-            .ci-wheel/bin/reproready check /tmp/checker-smoke.py > /tmp/checker-smoke.txt
-          env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN \
-            .ci-wheel/bin/reproready check /tmp/checker-smoke.py --json > /tmp/checker-smoke.json
-          env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN \
-            .ci-wheel/bin/reproready score /tmp/score-smoke --json > /tmp/score-smoke.json
-          .ci-wheel/bin/python -c \
-            "import json; from pathlib import Path; assert json.loads(Path('/tmp/checker-smoke.json').read_text())['schema_version'] == '1'; assert '\\x1b[' not in Path('/tmp/checker-smoke.txt').read_text(); assert 'r' in json.loads(Path('/tmp/score-smoke.json').read_text())"
+
+          for kind in wheel sdist; do
+            if [[ $kind == wheel ]]; then
+              distribution=("$repo_root"/dist/*.whl)
+            else
+              distribution=("$repo_root"/dist/*.tar.gz)
+            fi
+            environment="$repo_root/.ci-$kind"
+            uv venv --python 3.14 "$environment"
+            uv pip install --python "$environment/bin/python" "${distribution[@]}"
+
+            cd /tmp
+            env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN \
+              "$environment/bin/python" -c \
+              "import json; from importlib.metadata import version; from importlib.resources import files; from reproready import check_path; assert version('reproready') == '0.2.0'; json.loads(files('reproready').joinpath('schemas/check-report-v1.schema.json').read_text()); assert check_path('/tmp/checker-smoke.py').schema_version == '1'"
+            env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN \
+              "$environment/bin/reproready" check /tmp/checker-smoke.py \
+              > "/tmp/checker-smoke-$kind.txt"
+            env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN \
+              "$environment/bin/reproready" check /tmp/checker-smoke.py --json \
+              > "/tmp/checker-smoke-$kind.json"
+            env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN \
+              "$environment/bin/reproready" view "/tmp/checker-smoke-$kind.json" --plain \
+              > "/tmp/checker-view-$kind.txt"
+            env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN \
+              "$environment/bin/reproready" score /tmp/score-smoke --json \
+              > "/tmp/score-smoke-$kind.json"
+            "$environment/bin/python" -c \
+              "import json; from pathlib import Path; kind='$kind'; report=json.loads(Path(f'/tmp/checker-smoke-{kind}.json').read_text()); assert report['schema_version'] == '1'; assert '\\x1b[' not in Path(f'/tmp/checker-smoke-{kind}.txt').read_text(); assert 'Artifact' in Path(f'/tmp/checker-view-{kind}.txt').read_text(); assert 'r' in json.loads(Path(f'/tmp/score-smoke-{kind}.json').read_text())"
+          done

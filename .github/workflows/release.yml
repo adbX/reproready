@@ -1,0 +1,199 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      wheel_sha256:
+        description: SHA-256 of the verified wheel
+        required: true
+        type: string
+      sdist_sha256:
+        description: SHA-256 of the verified source distribution
+        required: true
+        type: string
+      release_notes_reviewed:
+        description: Confirm that the draft assets and generated notes were reviewed
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@94527f2e458b27549849d47d273a16bec83a01e9 # v6
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          enable-cache: false
+      - name: Verify tag, review confirmation, and exact-commit CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_WHEEL_SHA256: ${{ inputs.wheel_sha256 }}
+          EXPECTED_SDIST_SHA256: ${{ inputs.sdist_sha256 }}
+          RELEASE_NOTES_REVIEWED: ${{ inputs.release_notes_reviewed }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ $GITHUB_REF_TYPE == tag ]]
+          [[ $RELEASE_NOTES_REVIEWED == true ]]
+          [[ $EXPECTED_WHEEL_SHA256 =~ ^[0-9a-f]{64}$ ]]
+          [[ $EXPECTED_SDIST_SHA256 =~ ^[0-9a-f]{64}$ ]]
+
+          version=$(python3 -c "import pathlib, tomllib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          [[ $GITHUB_REF_NAME == "v$version" ]]
+          owner_reviewer_count=$(gh api \
+            "repos/$GITHUB_REPOSITORY/environments/pypi" \
+            --jq ".protection_rules | map(select(.type == \"required_reviewers\")) | map(.reviewers[]) | map(select(.type == \"User\" and .reviewer.login == \"$GITHUB_REPOSITORY_OWNER\")) | length")
+          (( owner_reviewer_count >= 1 ))
+
+          ci_run_id=$(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=push&status=success&per_page=100" \
+            --jq ".workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\" and .conclusion == \"success\") | .id")
+          [[ -n $ci_run_id ]]
+      - name: Build and check distributions
+        env:
+          EXPECTED_WHEEL_SHA256: ${{ inputs.wheel_sha256 }}
+          EXPECTED_SDIST_SHA256: ${{ inputs.sdist_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SOURCE_DATE_EPOCH
+          SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")
+          uv build --no-sources
+          uvx twine check --strict dist/*
+
+          shopt -s nullglob
+          wheel=(dist/*.whl)
+          sdist=(dist/*.tar.gz)
+          (( ${#wheel[@]} == 1 ))
+          (( ${#sdist[@]} == 1 ))
+          printf '%s  %s\n' "$EXPECTED_WHEEL_SHA256" "${wheel[0]}" | sha256sum --check --strict
+          printf '%s  %s\n' "$EXPECTED_SDIST_SHA256" "${sdist[0]}" | sha256sum --check --strict
+      - name: Install each distribution and exercise public surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo_root=$PWD
+          printf '%s\n' "open('/ci/input.csv')" > /tmp/checker-smoke.py
+          mkdir /tmp/score-smoke
+          printf '%s\n' "print('score smoke')" > /tmp/score-smoke/main.py
+          printf '%s\n' "# Score smoke" > /tmp/score-smoke/README.md
+
+          for kind in wheel sdist; do
+            if [[ $kind == wheel ]]; then
+              distribution=("$repo_root"/dist/*.whl)
+            else
+              distribution=("$repo_root"/dist/*.tar.gz)
+            fi
+            environment="$repo_root/.release-$kind"
+            uv venv --python 3.14 "$environment"
+            uv pip install --python "$environment/bin/python" "${distribution[@]}"
+
+            cd /tmp
+            env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN \
+              "$environment/bin/python" -c \
+              "import json; from importlib.metadata import version; from importlib.resources import files; from reproready import check_path; assert version('reproready') == '0.2.0'; json.loads(files('reproready').joinpath('schemas/check-report-v1.schema.json').read_text()); assert check_path('/tmp/checker-smoke.py').schema_version == '1'"
+            env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN \
+              "$environment/bin/reproready" check /tmp/checker-smoke.py --json \
+              > "/tmp/checker-smoke-$kind.json"
+            env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN \
+              "$environment/bin/reproready" view "/tmp/checker-smoke-$kind.json" --plain \
+              > "/tmp/checker-view-$kind.txt"
+            env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN \
+              "$environment/bin/reproready" score /tmp/score-smoke --json \
+              > "/tmp/score-smoke-$kind.json"
+          done
+      - name: Verify reviewed draft release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ $(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft) == true ]]
+          [[ $(gh release view "$GITHUB_REF_NAME" --json isPrerelease --jq .isPrerelease) == false ]]
+          [[ -n $(gh release view "$GITHUB_REF_NAME" --json body --jq .body) ]]
+
+          mkdir release-assets
+          gh release download "$GITHUB_REF_NAME" --dir release-assets --pattern '*.whl' --pattern '*.tar.gz'
+          for distribution in dist/*; do
+            cmp "$distribution" "release-assets/$(basename "$distribution")"
+          done
+      - name: Store the verified distributions
+        uses: actions/upload-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v5
+        with:
+          name: python-package-distributions
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  publish-to-pypi:
+    needs: build-and-validate
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/reproready
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download the verified distributions
+        uses: actions/download-artifact@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          name: python-package-distributions
+          path: dist/
+      - name: Recheck hashes and any partial PyPI upload
+        env:
+          EXPECTED_WHEEL_SHA256: ${{ inputs.wheel_sha256 }}
+          EXPECTED_SDIST_SHA256: ${{ inputs.sdist_sha256 }}
+          RELEASE_VERSION: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheel=(dist/*.whl)
+          sdist=(dist/*.tar.gz)
+          (( ${#wheel[@]} == 1 ))
+          (( ${#sdist[@]} == 1 ))
+          printf '%s  %s\n' "$EXPECTED_WHEEL_SHA256" "${wheel[0]}" | sha256sum --check --strict
+          printf '%s  %s\n' "$EXPECTED_SDIST_SHA256" "${sdist[0]}" | sha256sum --check --strict
+
+          RELEASE_VERSION=${RELEASE_VERSION#v} python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from urllib.error import HTTPError
+          from urllib.request import urlopen
+
+          expected = {
+              path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in Path("dist").iterdir()
+          }
+          try:
+              with urlopen(
+                  f"https://pypi.org/pypi/reproready/{os.environ['RELEASE_VERSION']}/json",
+                  timeout=30,
+              ) as response:
+                  published = json.load(response)["urls"]
+          except HTTPError as error:
+              if error.code != 404:
+                  raise
+              published = []
+
+          for item in published:
+              filename = item["filename"]
+              if filename not in expected:
+                  raise SystemExit(f"unexpected existing PyPI file: {filename}")
+              if item["digests"]["sha256"] != expected[filename]:
+                  raise SystemExit(f"PyPI hash mismatch: {filename}")
+          PY
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@330a01c490aca151604b8cf639adc76d48f6c5d4 # release/v1
+        with:
+          skip-existing: true

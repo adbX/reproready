@@ -10,10 +10,10 @@ Use `uv` for the environment and commands:
 uv run pytest
 uv run ruff check
 uv run ruff format --check
-uv build
+uv build --no-sources
 ```
 
-Run focused tests during development. `.github/workflows/ci.yml` is the canonical integration procedure: lint and formatting checks, pytest on Python 3.10, 3.12, and 3.13, then a wheel build and clean-install smoke test of the public APIs and commands.
+Run focused tests during development. `.github/workflows/ci.yml` is the canonical integration procedure: lint and formatting checks, pytest on Python 3.11-3.14, then a build and clean-install smoke test of both distributions through the public APIs and commands.
 
 ## Product and architecture contracts
 
@@ -56,4 +56,16 @@ Read the relevant authority and the complete affected code section before editin
 | Score pipeline | Run the affected score tests and `uv run reproready score examples/demo-artifact --json`. Review version stamps when output or semantics change. |
 | Packaging, dependencies, or public exports | Build the distributions, install the wheel in a clean environment, and exercise the affected import and command without relying on the source checkout. |
 
-A test is not a substitute for exercising the changed CLI or TUI surface. Keep permanent tests only for observable contracts and plausible regressions. Update `CHANGELOG.md` for user-visible changes, but never rewrite released entries.
+A test is not a substitute for exercising the changed CLI or TUI surface. Keep permanent tests only for observable contracts and plausible regressions.
+
+## Release procedure
+
+Releases use reviewed generated GitHub release notes. There is no project changelog.
+
+1. Update the version in `pyproject.toml`, `src/reproready/__init__.py`, the report fallback, package tests, citation metadata, and the worked report. Add the release date to `CITATION.cff` only for the final candidate.
+2. From a clean candidate commit, run the full CI procedure, `uv build --no-sources`, and `uvx twine check --strict dist/*`. Inspect both archives, install each outside the checkout, and exercise `check`, `view`, the Python API and schema, and the score command.
+3. Push the exact candidate and require a successful CI run for that commit. Create the matching `vX.Y.Z` tag and a draft GitHub release. Generate its notes, remove private or development-only details and unsupported claims, and attach the verified wheel and source distribution without rebuilding them.
+4. Confirm that the `pypi` GitHub environment requires the intended owner's approval and that PyPI Trusted Publishing names this repository, `.github/workflows/release.yml`, and that environment. Manually dispatch the Release workflow from the tag with both SHA-256 values only after the draft assets and notes have been reviewed.
+5. After PyPI succeeds, publish the draft GitHub release. Verify anonymous uv and isolated-pip installation, rendered metadata, both release assets, and matching GitHub and PyPI hashes before recording the release as complete.
+
+If an upload is partial, stop and compare every published filename and SHA-256 value with the frozen candidate. Resume only with byte-identical missing files. PyPI filenames cannot be replaced. Yank an incorrect release and publish a new version rather than trying to overwrite it.

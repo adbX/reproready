@@ -6,16 +6,12 @@ import codecs
 import os
 import re
 import stat
+import tomllib
 import zipfile
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - exercised only on Python 3.10.
-    import tomli as tomllib
 
 from .checker_archive import archive_structure_result
 from .checker_intake import FIXED_LIMITS, SourceSnapshot, WorkerCheckpoint

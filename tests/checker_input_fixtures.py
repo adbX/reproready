@@ -98,11 +98,15 @@ def _corrupt_crc(data: bytes, occurrence: int = 0) -> bytes:
     return bytes(patched)
 
 
-def _corrupt_central_directory(data: bytes) -> bytes:
+def _corrupt_central_directory(data: bytes, occurrence: int = 0) -> bytes:
     patched = bytearray(data)
-    central = patched.find(b"PK\x01\x02")
-    if central < 0:
-        raise ValueError("missing ZIP central-directory signature")
+    central = -1
+    start = 0
+    for _ in range(occurrence + 1):
+        central = patched.find(b"PK\x01\x02", start)
+        if central < 0:
+            raise ValueError("missing ZIP central-directory signature")
+        start = central + 4
     patched[central : central + 4] = b"BAD!"
     return bytes(patched)
 
@@ -406,7 +410,15 @@ def build_checker_inputs(root: Path) -> CheckerInputSet:
         ),
         "central_directory_error_zip": (
             "central-directory-error.zip",
-            _corrupt_central_directory(basic),
+            _corrupt_central_directory(
+                _zip_bytes(
+                    [
+                        ("first.py", b"first = 1\n"),
+                        ("second.py", b"second = 2\n"),
+                    ]
+                ),
+                occurrence=1,
+            ),
         ),
         "zip_named_python": ("zip-payload.py", basic),
         "docx_named_zip": ("document.docx", basic),
