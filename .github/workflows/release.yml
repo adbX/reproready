@@ -3,6 +3,10 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: Existing protected release tag to build and publish
+        required: true
+        type: string
       wheel_sha256:
         description: SHA-256 of the verified wheel
         required: true
@@ -26,6 +30,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+          ref: ${{ inputs.release_tag }}
       - name: Install uv
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
@@ -33,19 +38,22 @@ jobs:
       - name: Verify tag, review confirmation, and exact-commit CI
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
           EXPECTED_WHEEL_SHA256: ${{ inputs.wheel_sha256 }}
           EXPECTED_SDIST_SHA256: ${{ inputs.sdist_sha256 }}
           RELEASE_NOTES_REVIEWED: ${{ inputs.release_notes_reviewed }}
         shell: bash
         run: |
           set -euo pipefail
-          [[ $GITHUB_REF_TYPE == tag ]]
+          [[ -n $RELEASE_TAG ]]
           [[ $RELEASE_NOTES_REVIEWED == true ]]
           [[ $EXPECTED_WHEEL_SHA256 =~ ^[0-9a-f]{64}$ ]]
           [[ $EXPECTED_SDIST_SHA256 =~ ^[0-9a-f]{64}$ ]]
 
           version=$(python3 -c "import pathlib, tomllib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
-          [[ $GITHUB_REF_NAME == "v$version" ]]
+          [[ $RELEASE_TAG == "v$version" ]]
+          release_sha=$(git rev-parse HEAD)
+          [[ $(git describe --tags --exact-match "$release_sha") == "$RELEASE_TAG" ]]
           owner_reviewer_count=$(gh api \
             "repos/$GITHUB_REPOSITORY/environments/pypi" \
             --jq ".protection_rules | map(select(.type == \"required_reviewers\")) | map(.reviewers[]) | map(select(.type == \"User\" and .reviewer.login == \"$GITHUB_REPOSITORY_OWNER\")) | length")
@@ -53,7 +61,7 @@ jobs:
 
           ci_run_id=$(gh api \
             "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=push&status=success&per_page=100" \
-            --jq ".workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\" and .conclusion == \"success\") | .id")
+            --jq ".workflow_runs[] | select(.head_sha == \"$release_sha\" and .conclusion == \"success\") | .id")
           [[ -n $ci_run_id ]]
       - name: Build and check distributions
         env:
@@ -63,7 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           export SOURCE_DATE_EPOCH
-          SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")
+          SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
           uv build --no-sources
           uvx twine check --strict dist/*
 
@@ -111,15 +119,16 @@ jobs:
       - name: Verify reviewed draft release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         shell: bash
         run: |
           set -euo pipefail
-          [[ $(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft) == true ]]
-          [[ $(gh release view "$GITHUB_REF_NAME" --json isPrerelease --jq .isPrerelease) == false ]]
-          [[ -n $(gh release view "$GITHUB_REF_NAME" --json body --jq .body) ]]
+          [[ $(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft) == false ]]
+          [[ $(gh release view "$RELEASE_TAG" --json isPrerelease --jq .isPrerelease) == true ]]
+          [[ -n $(gh release view "$RELEASE_TAG" --json body --jq .body) ]]
 
           mkdir release-assets
-          gh release download "$GITHUB_REF_NAME" --dir release-assets --pattern '*.whl' --pattern '*.tar.gz'
+          gh release download "$RELEASE_TAG" --dir release-assets --pattern '*.whl' --pattern '*.tar.gz'
           for distribution in dist/*; do
             cmp "$distribution" "release-assets/$(basename "$distribution")"
           done
@@ -151,7 +160,7 @@ jobs:
         env:
           EXPECTED_WHEEL_SHA256: ${{ inputs.wheel_sha256 }}
           EXPECTED_SDIST_SHA256: ${{ inputs.sdist_sha256 }}
-          RELEASE_VERSION: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ inputs.release_tag }}
         shell: bash
         run: |
           set -euo pipefail
