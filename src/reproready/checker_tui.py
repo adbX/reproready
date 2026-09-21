@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import Counter
 from collections.abc import Sequence
+from pathlib import Path
 from typing import ClassVar, cast
 
 from rich.console import Group, RenderableType
@@ -897,6 +898,7 @@ class ReportBrowserApp(App[int]):
         self._pending_load: tuple[int, int] | None = None
         self._loader_task: asyncio.Task[None] | None = None
         self._shutting_down = False
+        self._validation_cache: dict[Path, bytes] = {}
         self._presentation: ReportPresentation | None = None
         self._current_error: SavedReportError | None = None
         self._page_keys: list[SectionKey] = ["artifact" for _entry in entries]
@@ -1054,7 +1056,11 @@ class ReportBrowserApp(App[int]):
                     error = SavedReportError(entry.error.code, entry.error.message)
                 else:
                     try:
-                        report = await asyncio.to_thread(load_saved_report, entry.path)
+                        report = await asyncio.to_thread(
+                            load_saved_report,
+                            entry.path,
+                            validation_cache=self._validation_cache,
+                        )
                     except SavedReportError as caught:
                         error = SavedReportError(caught.code, caught.message)
                     except Exception:  # noqa: BLE001 - fixed viewer error boundary

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -258,11 +259,22 @@ def _validator() -> Draft202012Validator:
     return Draft202012Validator(schema)
 
 
-def load_saved_report(path: Path) -> dict[str, object]:
+def load_saved_report(
+    path: Path,
+    *,
+    validation_cache: dict[Path, bytes] | None = None,
+) -> dict[str, object]:
     """Load and validate one saved checker report without inspecting its artifact."""
 
-    document = _decode_document(_read_regular_file(path))
+    payload = _read_regular_file(path)
+    document = _decode_document(payload)
+    digest = hashlib.sha256(payload).digest() if validation_cache is not None else None
+    del payload
+
     _require_supported_contract(document)
+    if digest is not None and validation_cache.get(path) == digest:
+        return document
+
     try:
         _validator().validate(document)
     except ValidationError as error:
@@ -285,4 +297,7 @@ def load_saved_report(path: Path) -> dict[str, object]:
             "invalid_report_references",
             "The saved checker report contains inconsistent references.",
         ) from error
+
+    if digest is not None:
+        validation_cache[path] = digest
     return document

@@ -6,6 +6,7 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Reduced repeat saved-report navigation latency by reusing successful schema and reference validation for identical report bytes within one interactive session. Every revisit still reads and strictly decodes the current regular file into a fresh document, so changed, missing, symbolic-link, and invalid reports are admitted or rejected from their current state.
 - Replaced the repository's Claude-only instructions with one canonical cross-agent guide covering
   checker and score contracts, task routing, and change-scoped verification. `CLAUDE.md` now links
   to `AGENTS.md`, so agents use the same current repository guidance.

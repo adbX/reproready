@@ -4,18 +4,24 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import threading
 from io import StringIO
 from pathlib import Path
 from shutil import copyfile
 
+import pytest
 from rich.console import Console
 from rich.text import Text
 from textual.widgets import Input, OptionList, Static, Tab, Tabs
 
 from reproready import checker_tui
 from reproready.checker_tui import ReportBrowserApp
-from reproready.checker_view import SavedReportEntry, load_saved_report
+from reproready.checker_view import (
+    SavedReportEntry,
+    SavedReportError,
+    load_saved_report,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures" / "checker-report-v1"
 
@@ -372,6 +378,148 @@ def test_rejected_report_does_not_block_later_valid_report(tmp_path: Path) -> No
     assert malformed.read_bytes() == before
 
 
+def test_reopening_report_reads_changed_bytes_despite_restored_mtime(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "report.json"
+    copyfile(FIXTURES / "complete-direct-python.json", report_path)
+    original = report_path.read_bytes()
+    changed = original.replace(b'"clean.py"', b'"other.py"', 1)
+    assert changed != original
+    assert len(changed) == len(original)
+    original_mtime_ns = report_path.stat().st_mtime_ns
+
+    async def exercise() -> None:
+        app = ReportBrowserApp(
+            [
+                SavedReportEntry(report_path),
+                SavedReportEntry(FIXTURES / "partial-hostile-zip.json"),
+            ]
+        )
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            await _open_selected(app, pilot)
+            assert app.known_names[0] == "clean.py"
+
+            app.load_idle.clear()
+            await pilot.press("right_square_bracket")
+            await _wait_for_load(app)
+
+            report_path.write_bytes(changed)
+            changed_status = report_path.stat()
+            os.utime(
+                report_path,
+                ns=(changed_status.st_atime_ns, original_mtime_ns),
+            )
+            assert report_path.stat().st_mtime_ns == original_mtime_ns
+
+            app.load_idle.clear()
+            await pilot.press("left_square_bracket")
+            await _wait_for_load(app)
+            await pilot.pause()
+
+            subject = app._report_screen.query_one("#report-subject", Static)
+            assert app.known_names[0] == "other.py"
+            assert _static_text(subject) == "other.py"
+            await pilot.press("q")
+        assert app.return_value == 0
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    ("change", "error_code"),
+    [
+        ("remove", "report_not_found"),
+        ("symlink", "invalid_report_path"),
+    ],
+)
+def test_reopening_report_rechecks_file_admission(
+    tmp_path: Path,
+    change: str,
+    error_code: str,
+) -> None:
+    report_path = tmp_path / "report.json"
+    copyfile(FIXTURES / "complete-direct-python.json", report_path)
+    other_path = FIXTURES / "partial-hostile-zip.json"
+
+    async def exercise() -> None:
+        app = ReportBrowserApp(
+            [SavedReportEntry(report_path), SavedReportEntry(other_path)]
+        )
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            await _open_selected(app, pilot)
+            assert app.known_names[0] == "clean.py"
+
+            app.load_idle.clear()
+            await pilot.press("right_square_bracket")
+            await _wait_for_load(app)
+            assert app._presentation is not None
+
+            report_path.unlink()
+            if change == "symlink":
+                report_path.symlink_to(
+                    (FIXTURES / "complete-direct-python.json").resolve()
+                )
+
+            app.load_idle.clear()
+            await pilot.press("left_square_bracket")
+            await _wait_for_load(app)
+            assert app.report_errors[0].code == error_code
+
+            app.load_idle.clear()
+            await pilot.press("right_square_bracket")
+            await _wait_for_load(app)
+            assert app._presentation is not None
+            assert 1 not in app.report_errors
+            await pilot.press("q")
+        assert app.return_value == 2
+
+    asyncio.run(exercise())
+
+
+def test_validation_cache_never_admits_prior_failures(tmp_path: Path) -> None:
+    report_path = tmp_path / "report.json"
+    fixture_path = FIXTURES / "complete-direct-python.json"
+    original = json.loads(fixture_path.read_text(encoding="utf-8"))
+    cache: dict[Path, bytes] = {}
+
+    schema_invalid = dict(original)
+    schema_invalid.pop("inventory")
+    report_path.write_text(json.dumps(schema_invalid), encoding="utf-8")
+    for _attempt in range(2):
+        with pytest.raises(SavedReportError) as caught:
+            load_saved_report(report_path, validation_cache=cache)
+        assert caught.value.code == "invalid_report_schema"
+    assert report_path not in cache
+
+    reference_invalid = json.loads(fixture_path.read_text(encoding="utf-8"))
+    reference_invalid["source_index"][0]["member_id"] = "member:9"
+    report_path.write_text(json.dumps(reference_invalid), encoding="utf-8")
+    for _attempt in range(2):
+        with pytest.raises(SavedReportError) as caught:
+            load_saved_report(report_path, validation_cache=cache)
+        assert caught.value.code == "invalid_report_references"
+    assert report_path not in cache
+
+    copyfile(fixture_path, report_path)
+    restored = load_saved_report(report_path, validation_cache=cache)
+    assert restored["artifact"]["display_name"] == "clean.py"
+
+
+def test_validation_cache_returns_fresh_document(tmp_path: Path) -> None:
+    report_path = tmp_path / "report.json"
+    copyfile(FIXTURES / "complete-direct-python.json", report_path)
+    cache: dict[Path, bytes] = {}
+
+    first = load_saved_report(report_path, validation_cache=cache)
+    first["artifact"]["display_name"] = "mutated.py"
+
+    second = load_saved_report(report_path, validation_cache=cache)
+    assert second["artifact"]["display_name"] == "clean.py"
+
+
 def test_rapid_navigation_cannot_install_stale_report(monkeypatch) -> None:
     first_started = threading.Event()
     release_first = threading.Event()
@@ -379,12 +527,16 @@ def test_rapid_navigation_cannot_install_stale_report(monkeypatch) -> None:
     first = FIXTURES / "partial-hostile-zip.json"
     third = FIXTURES / "complete-direct-python.json"
 
-    def controlled_loader(path: Path) -> dict[str, object]:
+    def controlled_loader(
+        path: Path,
+        *,
+        validation_cache: dict[Path, bytes] | None = None,
+    ) -> dict[str, object]:
         calls.append(path)
         if path == first:
             first_started.set()
             assert release_first.wait(timeout=3)
-        return load_saved_report(path)
+        return load_saved_report(path, validation_cache=validation_cache)
 
     monkeypatch.setattr(checker_tui, "load_saved_report", controlled_loader)
 
@@ -435,10 +587,14 @@ def test_return_to_list_rejects_late_loader_install(monkeypatch) -> None:
     started = threading.Event()
     release = threading.Event()
 
-    def controlled_loader(path: Path) -> dict[str, object]:
+    def controlled_loader(
+        path: Path,
+        *,
+        validation_cache: dict[Path, bytes] | None = None,
+    ) -> dict[str, object]:
         started.set()
         assert release.wait(timeout=3)
-        return load_saved_report(path)
+        return load_saved_report(path, validation_cache=validation_cache)
 
     monkeypatch.setattr(checker_tui, "load_saved_report", controlled_loader)
 
