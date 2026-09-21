@@ -8,10 +8,16 @@ ReproReady is a static checker for research artifacts that inspects code, data, 
 
 ## Install
 
-Requires Python 3.11 or newer on macOS or Linux. Install the exact release with [uv](https://docs.astral.sh/uv/):
+Requires Python 3.11 or newer on macOS or Linux. Install the current release with [uv](https://docs.astral.sh/uv/):
 
 ```sh
-uv tool install 'reproready==0.2.0'
+uv tool install reproready
+```
+
+To try the command without keeping it installed:
+
+```sh
+uvx reproready check artifact.zip
 ```
 
 Alternatively, install it with pip in an isolated virtual environment:
@@ -19,13 +25,13 @@ Alternatively, install it with pip in an isolated virtual environment:
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install 'reproready==0.2.0'
+python -m pip install reproready
 ```
 
 For the Python API in a uv project, add the package as a project dependency:
 
 ```sh
-uv add 'reproready==0.2.0'
+uv add reproready
 ```
 
 ## Check your code

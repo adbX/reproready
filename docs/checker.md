@@ -6,10 +6,16 @@ Version `0.2.0` uses report schema version `1` and the eleven-rule [`python-v1` 
 
 ## Installation
 
-Requires Python 3.11 or newer on macOS or Linux. Install the exact release with [uv](https://docs.astral.sh/uv/):
+Requires Python 3.11 or newer on macOS or Linux. Install the current release with [uv](https://docs.astral.sh/uv/):
 
 ```sh
-uv tool install 'reproready==0.2.0'
+uv tool install reproready
+```
+
+To try the command without keeping it installed:
+
+```sh
+uvx reproready check artifact.zip
 ```
 
 Alternatively, install it with pip in an isolated virtual environment:
@@ -17,13 +23,13 @@ Alternatively, install it with pip in an isolated virtual environment:
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install 'reproready==0.2.0'
+python -m pip install reproready
 ```
 
 To use the Python API in another uv project:
 
 ```sh
-uv add 'reproready==0.2.0'
+uv add reproready
 ```
 
 ## Command-line interface
