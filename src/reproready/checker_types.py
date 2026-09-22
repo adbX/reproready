@@ -10,7 +10,16 @@ _Record = Mapping[str, object]
 
 
 class CheckInputError(Exception):
-    """A top-level checker input rejected with a stable, sanitized reason."""
+    """A top-level checker input rejected with a stable, sanitized reason.
+
+    ``code`` is one of ``source_not_found``, ``source_not_accessible``,
+    ``top_level_link``, ``not_regular_file``, or ``unsupported_system``.
+    ``message`` never includes a host path or raw operating-system exception.
+
+    Attributes:
+        code: Stable machine-readable rejection reason.
+        message: Sanitized explanation suitable for display.
+    """
 
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
@@ -20,7 +29,21 @@ class CheckInputError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class CheckMember:
-    """One inventory member from a completed checker document."""
+    """One inventory member from a completed checker document.
+
+    Attributes:
+        container_id: Stable identifier for the containing ZIP.
+        member_id: Stable identifier for this inventory member.
+        parent_member_id: Identifier of the parent member for nested content.
+        name: Decoded member name retained in the report.
+        duplicate_ordinal: One-based occurrence among entries with this name.
+        kind: Recorded member kind.
+        compressed_size: Compressed byte size when available.
+        expanded_size: Expanded byte size when available.
+        read_status: Recorded member read outcome.
+        integrity_status: Recorded member integrity outcome.
+        issues: Saved issue records for this member.
+    """
 
     container_id: str
     member_id: str
@@ -32,7 +55,7 @@ class CheckMember:
     expanded_size: int | None
     read_status: str
     integrity_status: str
-    issues: tuple[_Record, ...]
+    issues: tuple[Mapping[str, object], ...]
 
     @classmethod
     def _from_record(cls, record: _Record) -> CheckMember:
@@ -53,19 +76,33 @@ class CheckMember:
 
 @dataclass(frozen=True, slots=True)
 class CheckReport:
-    """One typed, schema-shaped result from :func:`reproready.check_path`."""
+    """A typed view of one schema-shaped checker report.
+
+    Attributes:
+        schema_version: Version of the machine-readable report contract.
+        tool_version: ReproReady version that created the report.
+        ruleset_version: Version of the checker ruleset.
+        artifact: Saved artifact identity and snapshot record.
+        runtime: Saved operating-system, Python, and parser versions.
+        limits: Effective and reached inspection limits.
+        inventory_status: Overall saved inventory status.
+        members: Inventory members in deterministic report order.
+        inventory_issues: Saved inventory-level issue records.
+        source_index: Saved source records in deterministic report order.
+        rule_results: Ordered result record for every rule.
+    """
 
     schema_version: str
     tool_version: str
     ruleset_version: str
-    artifact: _Record
-    runtime: _Record
-    limits: _Record
+    artifact: Mapping[str, object]
+    runtime: Mapping[str, object]
+    limits: Mapping[str, object]
     inventory_status: str
     members: tuple[CheckMember, ...]
-    inventory_issues: tuple[_Record, ...]
-    source_index: tuple[_Record, ...]
-    rule_results: tuple[_Record, ...]
+    inventory_issues: tuple[Mapping[str, object], ...]
+    source_index: tuple[Mapping[str, object], ...]
+    rule_results: tuple[Mapping[str, object], ...]
     _document: dict[str, object] = field(repr=False, compare=False)
 
     @classmethod
@@ -90,6 +127,11 @@ class CheckReport:
         )
 
     def to_dict(self) -> dict[str, object]:
-        """Return the retained schema document as a borrowed, read-only dictionary."""
+        """Return the retained report dictionary without copying it.
+
+        The checker does not reread or reinspect the input. The returned
+        dictionary and its nested records are borrowed from this report and
+        must be treated as read-only.
+        """
 
         return self._document

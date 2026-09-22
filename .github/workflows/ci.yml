@@ -43,6 +43,21 @@ jobs:
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} pytest
 
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: false
+      - name: Build documentation
+        run: uv run --locked --group docs zensical build --clean --strict
+      - name: Validate documentation artifact
+        run: uv run scripts/validate_docs_site.py site
+
   build-install:
     runs-on: ubuntu-latest
     steps:

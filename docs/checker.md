@@ -4,33 +4,7 @@ The checker inspects one regular file without running artifact code. Authors and
 
 Version `0.2.0` uses report schema version `1` and the eleven-rule [`python-v1` ruleset](checker-ruleset-v1.md).
 
-## Installation
-
-Requires Python 3.11 or newer on macOS or Linux. Install the current release with [uv](https://docs.astral.sh/uv/):
-
-```sh
-uv tool install reproready
-```
-
-To try the command without keeping it installed:
-
-```sh
-uvx reproready check artifact.zip
-```
-
-Alternatively, install it with pip in an isolated virtual environment:
-
-```sh
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install reproready
-```
-
-To use the Python API in another uv project:
-
-```sh
-uv add reproready
-```
+Start with the [Quick start](index.md) for installation and a first report. Use the generated [Python API reference](api.md) when integrating the checker in another Python project.
 
 ## Command-line interface
 
@@ -64,31 +38,7 @@ All eight pages remain available when a page has no saved records. An empty Find
 
 `view` accepts explicit report paths and directories. A directory selects case-insensitive top-level `.json` files plus an exact `report.json` in each immediate real child directory, in deterministic path order; selection does not recurse or follow directory links. Each report must be one regular, non-symbolic-link file of at most 128 MiB. The command admits compact output and older pretty-printed schema-v1 reports under that limit, uses strict UTF-8 and JSON decoding, rejects non-finite numbers, validates the packaged schema and cross-record references, and never fetches a schema or artifact. Invalid selected files remain unchanged and do not prevent navigation to valid reports. A valid saved report remains viewable after the original artifact changes or disappears.
 
-The [JSON Schema](../src/reproready/schemas/check-report-v1.schema.json) defines the full report. The checker does not produce HTML, JSON Lines, batch manifests, or a second artifact inventory.
-
-## Python API
-
-`check_path()` performs the same one-pass inspection and returns `CheckReport`:
-
-```python
-from reproready import CheckInputError, CheckMember, CheckReport, check_path
-
-try:
-    report: CheckReport = check_path("artifact.zip")
-except CheckInputError as error:
-    print(error.code, error.message)
-else:
-    members: tuple[CheckMember, ...] = report.members
-    document = report.to_dict()
-```
-
-`CheckReport` exposes version fields (`schema_version`, `tool_version`, `ruleset_version`), artifact/runtime/limit records, `inventory_status`, members, inventory issues, the source index, and ordered rule results. `CheckMember` exposes container and member IDs, parent member, decoded name, duplicate ordinal, kind, compressed and expanded sizes, read and integrity states, and member issues.
-
-`to_dict()` returns the retained report dictionary without rereading, reinspecting, or copying it. Treat the dictionary as read-only.
-
-Top-level input rejections raise `CheckInputError` with fixed `code` and `message` values, never a host path or raw operating-system exception. Codes are `source_not_found`, `source_not_accessible`, `top_level_link`, `not_regular_file`, and `unsupported_system`. Unexpected internal exceptions propagate.
-
-Source mutation, an input-size ceiling, a represented worker timeout or memory limit, and a worker crash return a valid report when the parent can produce one within its limits. These are inspection outcomes, not top-level input rejections.
+The release-matched [JSON Schema](https://github.com/adbX/reproready/blob/v0.2.0/src/reproready/schemas/check-report-v1.schema.json) defines the full report. The checker does not produce HTML, JSON Lines, batch manifests, or a second artifact inventory.
 
 ## Supported inputs
 
@@ -129,7 +79,7 @@ Findings and review items do not change either command's exit status.
 
 ## Worked example
 
-[`examples/checker-demo.py`](../examples/checker-demo.py) produces one lexical path finding and two review boxes:
+The release-matched [`examples/checker-demo.py`](https://github.com/adbX/reproready/blob/v0.2.0/examples/checker-demo.py) produces one lexical path finding and two review boxes:
 
 ```sh
 reproready check examples/checker-demo.py
@@ -137,7 +87,7 @@ reproready check examples/checker-demo.py --json > checker-demo-report.json
 reproready view checker-demo-report.json --all
 ```
 
-The display shows `POSIX absolute paths` under Findings, plus `Python search paths` and `Download comments` under Needs review. The [example JSON report](../examples/checker-demo-report.json) also includes ordinary `pathlib` and `sys` evidence omitted from the compact terminal view.
+The display shows `POSIX absolute paths` under Findings, plus `Python search paths` and `Download comments` under Needs review. The release-matched [example JSON report](https://github.com/adbX/reproready/blob/v0.2.0/examples/checker-demo-report.json) also includes ordinary `pathlib` and `sys` evidence omitted from the compact terminal view.
 
 ## Safety boundary and nonclaims
 

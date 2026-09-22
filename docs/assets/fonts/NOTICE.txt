@@ -1,0 +1,11 @@
+Self-hosted webfonts used by the ReproReady documentation site.
+
+IBM Plex Sans
+Source package: @fontsource/ibm-plex-sans 5.3.0
+License: SIL Open Font License 1.1
+License text: IBM-Plex-Sans-OFL-1.1.txt
+
+JetBrains Mono
+Source package: @fontsource/jetbrains-mono 5.3.0
+License: SIL Open Font License 1.1
+License text: JetBrains-Mono-OFL-1.1.txt

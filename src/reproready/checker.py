@@ -112,7 +112,22 @@ def _check_document(
 
 
 def check_path(source: str | os.PathLike[str]) -> CheckReport:
-    """Inspect one regular file and return its typed static-checker report."""
+    """Inspect one regular file without executing it.
+
+    Args:
+        source: Path to the file to inspect.
+
+    Returns:
+        A typed report for the completed or represented inspection outcome.
+        Findings, review items, unsupported content, partial coverage, source
+        mutation, and represented worker failures still return a report.
+
+    Raises:
+        CheckInputError: If top-level input admission rejects the path. See
+            ``CheckInputError.code`` for the stable reason.
+
+    Unexpected internal exceptions propagate.
+    """
 
     try:
         document = _check_document(source)

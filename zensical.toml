@@ -1,0 +1,56 @@
+[project]
+site_name = "ReproReady"
+site_url = "https://reproready.com/"
+site_description = "Documentation for the ReproReady static checker."
+site_author = "Adhithya Bhaskar"
+docs_dir = "docs"
+site_dir = "site"
+nav = [
+  { "Quick start" = "index.md" },
+  { "Guide" = "checker.md" },
+  { "Rules" = "checker-ruleset-v1.md" },
+  { "Python API" = "api.md" },
+]
+extra_css = [
+  "stylesheets/reproready.css",
+]
+extra_javascript = [
+  "javascripts/reproready.js",
+]
+
+[project.theme]
+variant = "classic"
+language = "en"
+font = false
+features = [
+  "navigation.tabs",
+  "navigation.tabs.sticky",
+  "toc.follow",
+  "content.code.copy",
+]
+
+[[project.theme.palette]]
+scheme = "default"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to light mode"
+
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["src"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "google"
+heading_level = 3
+show_source = false
+show_root_heading = false
+show_root_full_path = false
+show_symbol_type_heading = true
+show_symbol_type_toc = true
+members_order = "source"
+separate_signature = true
+show_signature_annotations = true
+signature_crossrefs = true
