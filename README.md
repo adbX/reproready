@@ -36,7 +36,7 @@ uv add reproready
 
 ## Check your code
 
-Pass one ZIP archive or a [supported Python, notebook, or dependency file](https://github.com/adbX/reproready/blob/v0.2.0/docs/checker.md#supported-inputs). Directories are not accepted.
+Pass one ZIP archive or a [supported Python, notebook, or dependency file](https://reproready.com/checker/#supported-inputs). Directories are not accepted.
 
 ```sh
 reproready check artifact.zip
@@ -50,11 +50,12 @@ The terminal report separates the same eight stable pages: Artifact, Content ana
 
 ## Documentation
 
-- [Checker guide](https://github.com/adbX/reproready/blob/v0.2.0/docs/checker.md): supported inputs, report interpretation, and inspection limits.
-- [Python API](https://github.com/adbX/reproready/blob/v0.2.0/docs/checker.md#python-api): use the checker from another Python project.
-- [Ruleset](https://github.com/adbX/reproready/blob/v0.2.0/docs/checker-ruleset-v1.md): what each check looks for and what it cannot determine.
+- [Quick start](https://reproready.com/): install the checker and create, save, and reopen a first report.
+- [Checker guide](https://reproready.com/checker/): supported inputs, report interpretation, and inspection limits.
+- [Python API](https://reproready.com/api/): use the checker from another Python project.
+- [Ruleset](https://reproready.com/checker-ruleset-v1/): what each check looks for and what it cannot determine.
 - [Security policy](https://github.com/adbX/reproready/blob/v0.2.0/SECURITY.md): privately report vulnerabilities without posting sensitive artifacts publicly.
-- [Worked example](https://github.com/adbX/reproready/blob/v0.2.0/docs/checker.md#worked-example): sample code and its report.
+- [Worked example](https://reproready.com/checker/#worked-example): sample code and its report.
 
 The package also includes a separate score command; see `reproready score --help`.
 

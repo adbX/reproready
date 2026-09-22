@@ -40,7 +40,8 @@ llm = ["anthropic>=0.40"]
 reproready = "reproready.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/adbX/reproready"
+Homepage = "https://reproready.com/"
+Documentation = "https://reproready.com/"
 Repository = "https://github.com/adbX/reproready"
 
 [dependency-groups]
