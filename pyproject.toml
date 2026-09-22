@@ -49,6 +49,10 @@ dev = [
     "pytest>=8.3",
     "ruff>=0.15",
 ]
+docs = [
+    "mkdocstrings-python>=2.0.8",
+    "zensical>=0.0.63",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -56,6 +60,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build]
 exclude = [
+    "/.cache",
     "/.github",
     "/.gitignore",
     "/.python-version",
@@ -63,6 +68,7 @@ exclude = [
     "/AGENTS.md",
     "/CLAUDE.md",
     "/uv.lock",
+    "/site",
 ]
 
 [tool.hatch.build.targets.wheel]

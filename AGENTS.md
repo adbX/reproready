@@ -10,10 +10,11 @@ Use `uv` for the environment and commands:
 uv run pytest
 uv run ruff check
 uv run ruff format --check
+uv run --locked --group docs zensical build --clean --strict
 uv build --no-sources
 ```
 
-Run focused tests during development. `.github/workflows/ci.yml` is the canonical integration procedure: lint and formatting checks, pytest on Python 3.11-3.14, then a build and clean-install smoke test of both distributions through the public APIs and commands.
+Run focused tests during development. `.github/workflows/ci.yml` is the canonical integration procedure: lint and formatting checks, pytest on Python 3.11-3.14, a strict documentation build and inventory check, then a build and clean-install smoke test of both distributions through the public APIs and commands.
 
 ## Product and architecture contracts
 
@@ -28,7 +29,7 @@ Run focused tests during development. `.github/workflows/ci.yml` is the canonica
 - Scoring behavior is versioned through its exported routing, rubric, extraction, prompt, and tier/scope identifiers. A behavior change must review those identifiers and the pinned end-to-end expectations.
 - Test inputs and archives remain synthetic. Never commit a real third-party artifact as a fixture.
 
-The checker guide in `docs/checker.md`, ruleset in `docs/checker-ruleset-v1.md`, browser contract in `docs/checker-browser-v1.md`, and packaged JSON Schema are the detailed public authorities. Update them when their public behavior changes instead of duplicating detailed semantics here.
+The website Quick start in `docs/index.md`, checker guide in `docs/checker.md`, ruleset in `docs/checker-ruleset-v1.md`, generated checker API page in `docs/api.md`, browser contract in `development/checker-browser-v1.md`, and packaged JSON Schema are the detailed public authorities. Selected checker API documentation comes from public docstrings in `checker.py` and `checker_types.py`; do not duplicate that reference prose in Markdown. Update the relevant authority when public behavior changes instead of duplicating detailed semantics here.
 
 ## Task routing
 
@@ -41,6 +42,7 @@ The checker guide in `docs/checker.md`, ruleset in `docs/checker-ruleset-v1.md`,
 | Plain terminal output or CLI behavior | Checker guide command and process-outcome sections | `checker_render.py`, `cli.py`; `test_checker_render.py`, `test_checker_cli.py` |
 | Interactive saved-report viewer | Checker guide saved-report and interaction sections | `checker_view.py`, `checker_tui.py`; `test_checker_tui.py`, `test_checker_cli.py` |
 | Score behavior | Exported version constants, module docstrings, and pinned end-to-end behavior | Score pipeline modules; `test_inventory.py` through `test_aggregate.py`, plus `test_e2e.py` |
+| Documentation website or generated checker API | `zensical.toml`, the four files under `docs/` selected by its navigation, and selected checker docstrings | Website sources, styles, JavaScript, and selected public docstrings; strict documentation build and site inventory check |
 | Packaging or public exports | `pyproject.toml` and CI build-install job | `pyproject.toml`, `__init__.py`, `cli.py`; `test_checker_package.py` |
 
 Read the relevant authority and the complete affected code section before editing. Follow a data or behavior contract through every caller, renderer, schema, fixture, and document it affects.
@@ -54,6 +56,7 @@ Read the relevant authority and the complete affected code section before editin
 | Rich renderer or CLI | Run renderer and CLI tests, then inspect the actual command at a relevant width. Exercise plain or redirected output, `NO_COLOR`, JSON isolation, and exit behavior when the change can affect them. |
 | Textual viewer | Run TUI and CLI tests, then use the actual viewer in a PTY at representative wide and narrow sizes. Exercise the changed navigation, retained state, and exit path. |
 | Score pipeline | Run the affected score tests and `uv run reproready score examples/demo-artifact --json`. Review version stamps when output or semantics change. |
+| Documentation website or generated checker API | Run the exact locked strict build and site inventory check, then inspect the rendered surface at representative desktop and mobile widths. Exercise keyboard navigation, theme persistence, local assets, search, links, and the documented Quick start. |
 | Packaging, dependencies, or public exports | Build the distributions, install the wheel in a clean environment, and exercise the affected import and command without relying on the source checkout. |
 
 A test is not a substitute for exercising the changed CLI or TUI surface. Keep permanent tests only for observable contracts and plausible regressions.

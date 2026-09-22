@@ -2,7 +2,7 @@
 
 This internal protocol supports development rule-discovery sessions. It is not a public command, Python API, or model-assisted checker feature.
 
-Each fresh session uses one completed checker snapshot with a known SHA-256 and only data admitted by the checker's snapshot and inventory checks. Incomplete snapshots cannot start a session. Member, container, parent, and duplicate identities follow the [`python-v1` ruleset](checker-ruleset-v1.md#member-and-source-identity).
+Each fresh session uses one completed checker snapshot with a known SHA-256 and only data admitted by the checker's snapshot and inventory checks. Incomplete snapshots cannot start a session. Member, container, parent, and duplicate identities follow the [`python-v1` ruleset](../docs/checker-ruleset-v1.md#member-and-source-identity).
 
 ## Security boundary
 
@@ -17,7 +17,7 @@ The browser never:
 - Reads a directory, link, special entry, encrypted entry, or unsupported compression method as text.
 - Returns a checker temporary path, host path, raw exception, or unescaped terminal control text.
 
-Checker-owned temporary storage may hold snapshot and member data within the [shared limits](checker-ruleset-v1.md#fixed-limits). Repeated operations never reset member, expansion, memory, storage, or elapsed-processing budgets. Reads use safely cached checker-owned bytes or charge new expansion against remaining artifact-wide limits.
+Checker-owned temporary storage may hold snapshot and member data within the [shared limits](../docs/checker-ruleset-v1.md#fixed-limits). Repeated operations never reset member, expansion, memory, storage, or elapsed-processing budgets. Reads use safely cached checker-owned bytes or charge new expansion against remaining artifact-wide limits.
 
 ## Requests and responses
 
@@ -91,7 +91,7 @@ IDs, kinds, sizes, and issue codes copy the checker inventory. Direct input has 
 
 `inventory_complete` is true only on the final page of a completed checker inventory. A page with `next_cursor` can be `complete` but cannot establish that no later target exists.
 
-For direct inputs, `readable` and `searchable` are true only for the [four supported source kinds](checker-ruleset-v1.md#input-classification). For ZIP targets, both require `kind: "file"`, no structural indication of encryption or unsupported compression, and a case-insensitive name not ending in `.zip`, `.tar`, `.tar.gz`, `.tgz`, `.gz`, `.pdf`, or `.docx`.
+For direct inputs, `readable` and `searchable` are true only for the [four supported source kinds](../docs/checker-ruleset-v1.md#input-classification). For ZIP targets, both require `kind: "file"`, no structural indication of encryption or unsupported compression, and a case-insensitive name not ending in `.zip`, `.tar`, `.tar.gz`, `.tgz`, `.gz`, `.pdf`, or `.docx`.
 
 Unsupported direct inputs and those named member formats use `unsupported_format`. Directories, ZIP holder members, links, special entries, encrypted entries, and unsupported compression use their corresponding skip reason. Other regular members are eligible regardless of extension. These flags permit a text attempt, not guaranteed decoding: strict UTF-8 failure returns `decode_error` and no text.
 
